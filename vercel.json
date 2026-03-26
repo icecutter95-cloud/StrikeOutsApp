@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/cron/fetch-odds", "schedule": "0 * * * *" },
+    { "path": "/api/cron/fetch-starters", "schedule": "0 8 * * *" },
+    { "path": "/api/cron/close-games", "schedule": "0 2 * * *" }
+  ]
+}
