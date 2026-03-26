@@ -228,7 +228,7 @@ export async function getPitcherRecentStarts(
 ): Promise<{ ks: number; ip: number; pitches: number; date: string }[]> {
   const url =
     `${MLB_API}/people/${pitcherId}/stats` +
-    `?stats=gameLog&group=pitching&season=2025&gameType=R`;
+    `?stats=gameLog&group=pitching&season=2026&gameType=R`;
 
   let data: { stats?: Array<{ splits?: MLBGameLogSplit[] }> };
   try {

@@ -95,7 +95,7 @@ export async function getPitcherSeasonStats(
   // TODO: Verify endpoint URL each season; Baseball Savant may update parameters
   const url =
     `https://baseballsavant.mlb.com/statcast_search/csv` +
-    `?hfGT=R%7C&hfSea=2025%7C&player_type=pitcher` +
+    `?hfGT=R%7C&hfSea=2026%7C&player_type=pitcher` +
     `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
     `&chk_stats_k_percent=on&chk_stats_csw_percent=on&chk_stats_swstr_percent=on` +
     `&player_id=${pitcherId}&type=summary`;
@@ -176,7 +176,7 @@ async function fetchBatterKPct(
   // TODO: Verify these endpoint parameters against the current season
   const url =
     `https://baseballsavant.mlb.com/statcast_search/csv` +
-    `?hfGT=R%7C&hfSea=2025%7C&player_type=batter` +
+    `?hfGT=R%7C&hfSea=2026%7C&player_type=batter` +
     `&pitcher_throws=${pitcherThrows}` +
     `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
     `&chk_stats_k_percent=on&player_id=${batterId}&type=summary`;
