@@ -64,11 +64,17 @@ export async function getMLBPitcherKProps(
   }
 
   // Step 1: Get events for today
+  // commenceTimeTo uses next-day 08:00 UTC to capture late west-coast games
+  // (10pm PT = 05:00 UTC next day)
+  const nextDay = new Date(date + "T12:00:00Z");
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const nextDayStr = nextDay.toISOString().split("T")[0];
+
   let events: OddsAPIEvent[] = [];
   try {
     const eventsUrl =
       `${ODDS_API_BASE}/sports/baseball_mlb/events` +
-      `?apiKey=${apiKey}&dateFormat=iso&commenceTimeFrom=${date}T00:00:00Z&commenceTimeTo=${date}T23:59:59Z`;
+      `?apiKey=${apiKey}&dateFormat=iso&commenceTimeFrom=${date}T00:00:00Z&commenceTimeTo=${nextDayStr}T08:00:00Z`;
 
     const res = await fetch(eventsUrl, { next: { revalidate: 300 } });
     if (!res.ok) {
@@ -104,9 +110,10 @@ async function fetchEventKProps(
   apiKey: string
 ): Promise<OddsProp[]> {
   try {
+    // Try both common market key names the Odds API uses for pitcher K props
     const url =
       `${ODDS_API_BASE}/sports/baseball_mlb/events/${eventId}/odds` +
-      `?apiKey=${apiKey}&regions=us&markets=pitcher_strikeouts&oddsFormat=american`;
+      `?apiKey=${apiKey}&regions=us&markets=pitcher_strikeouts,batter_strikeouts&oddsFormat=american`;
 
     const res = await fetch(url, { next: { revalidate: 300 } });
     if (!res.ok) {
@@ -129,7 +136,9 @@ function parseKProps(data: OddsAPIEventOdds, eventId: string): OddsProp[] {
   >();
 
   for (const book of data.bookmakers ?? []) {
-    const market = book.markets?.find((m) => m.key === "pitcher_strikeouts");
+    const market = book.markets?.find(
+      (m) => m.key === "pitcher_strikeouts" || m.key === "batter_strikeouts"
+    );
     if (!market) continue;
 
     // Group outcomes by pitcher name + line

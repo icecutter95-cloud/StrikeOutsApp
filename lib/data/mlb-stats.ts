@@ -137,6 +137,9 @@ export async function getTodaysGames(date: string): Promise<GameInfo[]> {
         }
       ];
 
+      // Skip games that are already final
+      if (game.status?.abstractGameState === "Final") continue;
+
       for (const side of sides) {
         if (!side.pitcher) continue;
         games.push({
