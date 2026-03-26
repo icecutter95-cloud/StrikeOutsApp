@@ -122,8 +122,8 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // --- Lineup ---
-        const rawLineup = await getLineup(game.game_id, game.team_id);
+        // --- Lineup (fetch opposing batters, not the pitcher's own team) ---
+        const rawLineup = await getLineup(game.game_id, game.opponent_side);
 
         // Enrich lineup with K% data
         const enrichedLineup = await Promise.all(

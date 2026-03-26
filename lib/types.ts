@@ -169,6 +169,7 @@ export interface GameInfo {
   team_id: number;
   opponent: string;
   opponent_id: number;
+  opponent_side: "home" | "away"; // which side of the game the opponent bats from
   venue: string;
   game_time: string;
   pitcher_hand: "R" | "L" | null;

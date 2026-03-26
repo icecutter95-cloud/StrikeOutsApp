@@ -120,25 +120,28 @@ export async function getTodaysGames(date: string): Promise<GameInfo[]> {
       const gameTime = game.gameDate;
       const venue = game.venue?.name ?? "Unknown";
 
+      // Skip games that are already final
+      if (game.status?.abstractGameState === "Final") continue;
+
       const sides: Array<{
         team: MLBTeam;
         opponent: MLBTeam;
+        opponentSide: "home" | "away";
         pitcher?: MLBProbablePitcher;
       }> = [
         {
           team: game.teams.home.team,
           opponent: game.teams.away.team,
+          opponentSide: "away",
           pitcher: game.teams.home.probablePitcher
         },
         {
           team: game.teams.away.team,
           opponent: game.teams.home.team,
+          opponentSide: "home",
           pitcher: game.teams.away.probablePitcher
         }
       ];
-
-      // Skip games that are already final
-      if (game.status?.abstractGameState === "Final") continue;
 
       for (const side of sides) {
         if (!side.pitcher) continue;
@@ -149,6 +152,7 @@ export async function getTodaysGames(date: string): Promise<GameInfo[]> {
           team_id: side.team.id,
           opponent: side.opponent.abbreviation ?? side.opponent.name,
           opponent_id: side.opponent.id,
+          opponent_side: side.opponentSide,
           venue,
           game_time: gameTime,
           pitcher_hand: (side.pitcher.pitchHand?.code as "R" | "L") ?? null,
@@ -161,66 +165,79 @@ export async function getTodaysGames(date: string): Promise<GameInfo[]> {
   return games;
 }
 
+interface MLBLineupsResponse {
+  homePlayers?: Array<{
+    id: number;
+    fullName: string;
+    batSide?: { code: string };
+    lineupPosition?: number;
+  }>;
+  awayPlayers?: Array<{
+    id: number;
+    fullName: string;
+    batSide?: { code: string };
+    lineupPosition?: number;
+  }>;
+}
+
 /**
- * Fetches confirmed lineup for a team in a given game.
- * Returns batting order with batter IDs and names.
+ * Fetches the opponent lineup for a given game.
+ * Uses the dedicated /lineups endpoint (works pre-game once lineups are posted).
+ * Falls back to boxscore for in-progress games.
+ *
+ * opponentSide: "home" | "away" — the side the OPPOSING batters bat from.
  */
 export async function getLineup(
   gamePk: number,
-  teamId: number
+  opponentSide: "home" | "away"
 ): Promise<LineupPlayer[]> {
-  const url = `${MLB_API}/game/${gamePk}/boxscore`;
-
-  let data: { teams?: { home?: MLBBoxscoreTeam; away?: MLBBoxscoreTeam } };
+  // 1. Try the dedicated lineups endpoint (available ~2–3 hrs before first pitch)
   try {
-    const res = await fetch(url, { next: { revalidate: 60 } });
-    if (!res.ok) throw new Error(`MLB boxscore fetch failed: ${res.status}`);
-    data = await res.json() as MLBBoxscore;
+    const lineupUrl = `${MLB_API}/game/${gamePk}/lineups`;
+    const res = await fetch(lineupUrl, { next: { revalidate: 60 } });
+    if (res.ok) {
+      const data = await res.json() as MLBLineupsResponse;
+      const players = opponentSide === "home" ? data.homePlayers : data.awayPlayers;
+      if (players && players.length > 0) {
+        return players.map((p, idx) => ({
+          batter_id: String(p.id),
+          batter_name: p.fullName,
+          hand: (p.batSide?.code as "R" | "L" | "S") ?? null,
+          batting_order: p.lineupPosition ?? idx + 1,
+          k_pct_vs_rhp: null,
+          k_pct_vs_lhp: null
+        }));
+      }
+    }
   } catch (err) {
-    console.error("[mlb-stats] getLineup error:", err);
+    console.error("[mlb-stats] getLineup /lineups error:", err);
+  }
+
+  // 2. Fall back to boxscore (in-progress / post-game)
+  try {
+    const boxUrl = `${MLB_API}/game/${gamePk}/boxscore`;
+    const res = await fetch(boxUrl, { next: { revalidate: 60 } });
+    if (!res.ok) return [];
+    const data = await res.json() as MLBBoxscore;
+    const targetTeam = opponentSide === "home" ? data.teams.home : data.teams.away;
+    if (!targetTeam?.battingOrder?.length) return [];
+
+    return targetTeam.battingOrder.map((playerId, idx) => {
+      const key = `ID${playerId}`;
+      const player = targetTeam.players?.[key];
+      return {
+        batter_id: String(playerId),
+        batter_name: player?.person.fullName ?? `Player ${playerId}`,
+        hand: (player?.person.batSide?.code as "R" | "L" | "S") ?? null,
+        batting_order: idx + 1,
+        k_pct_vs_rhp: null,
+        k_pct_vs_lhp: null
+      };
+    });
+  } catch (err) {
+    console.error("[mlb-stats] getLineup boxscore fallback error:", err);
     return [];
   }
-
-  // Determine which side the teamId belongs to — we need the full schedule
-  // to know. As a fallback, try both and pick the one with battingOrder data.
-  const teamsData = (data as MLBBoxscore).teams;
-  const teamSides: MLBBoxscoreTeam[] = [teamsData.home, teamsData.away].filter(Boolean) as MLBBoxscoreTeam[];
-
-  // Find the side whose players match the teamId (teamId isn't directly in boxscore per-team
-  // so we use batting order presence as a heuristic; caller should pass correct side)
-  // For simplicity, return the first side that has a battingOrder.
-  let targetTeam: MLBBoxscoreTeam | undefined;
-  for (const side of teamSides) {
-    if (side.battingOrder && side.battingOrder.length > 0) {
-      // We'll just return the first team's lineup. Caller passes teamId for context
-      // but MLB boxscore doesn't expose team ID per side easily without the schedule call.
-      // A production app would cross-reference with the schedule. We do our best here.
-      targetTeam = side;
-      break;
-    }
-  }
-
-  if (!targetTeam) return [];
-
-  const battingOrder = targetTeam.battingOrder ?? [];
-  const players = targetTeam.players ?? {};
-
-  const lineup: LineupPlayer[] = [];
-  battingOrder.forEach((playerId, idx) => {
-    const key = `ID${playerId}`;
-    const player = players[key];
-    if (!player) return;
-    lineup.push({
-      batter_id: String(playerId),
-      batter_name: player.person.fullName,
-      hand: (player.person.batSide?.code as "R" | "L" | "S") ?? null,
-      batting_order: idx + 1,
-      k_pct_vs_rhp: null,
-      k_pct_vs_lhp: null
-    });
-  });
-
-  return lineup;
 }
 
 /**
