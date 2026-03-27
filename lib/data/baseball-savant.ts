@@ -173,10 +173,15 @@ async function fetchBatterKPct(
   batterId: number,
   pitcherThrows: "R" | "L"
 ): Promise<number | null> {
-  // TODO: Verify these endpoint parameters against the current season
+  // Use current + prior season so early-season sparse data doesn't blank out the table.
+  // Baseball Savant requires enough PA to return K% — a full prior season fills that gap.
+  const currentYear = new Date().getFullYear();
+  const priorYear = currentYear - 1;
+  const seasonParam = `${currentYear}%7C${priorYear}%7C`; // e.g. "2026|2025|"
+
   const url =
     `https://baseballsavant.mlb.com/statcast_search/csv` +
-    `?hfGT=R%7C&hfSea=2026%7C&player_type=batter` +
+    `?hfGT=R%7C&hfSea=${seasonParam}&player_type=batter` +
     `&pitcher_throws=${pitcherThrows}` +
     `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
     `&chk_stats_k_percent=on&player_id=${batterId}&type=summary`;
