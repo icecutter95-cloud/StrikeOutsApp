@@ -165,77 +165,71 @@ export async function getTodaysGames(date: string): Promise<GameInfo[]> {
   return games;
 }
 
-interface MLBLineupsResponse {
-  homePlayers?: Array<{
-    id: number;
-    fullName: string;
-    batSide?: { code: string };
-    lineupPosition?: number;
-  }>;
-  awayPlayers?: Array<{
-    id: number;
-    fullName: string;
-    batSide?: { code: string };
-    lineupPosition?: number;
+interface MLBScheduleLineupPlayer {
+  id: number;
+  fullName: string;
+  primaryPosition?: { code: string; abbreviation: string };
+}
+
+interface MLBScheduleWithLineups {
+  dates?: Array<{
+    games?: Array<{
+      lineups?: {
+        homePlayers?: MLBScheduleLineupPlayer[];
+        awayPlayers?: MLBScheduleLineupPlayer[];
+      };
+    }>;
   }>;
 }
 
 /**
- * Fetches the opponent lineup for a given game.
- * Uses the dedicated /lineups endpoint (works pre-game once lineups are posted).
- * Falls back to boxscore for in-progress games.
+ * Fetches the opponent lineup for a given game using the MLB schedule
+ * endpoint with lineups hydration. Array order = batting order.
+ * Lineups are available once officially posted (~2–3 hrs before first pitch).
  *
- * opponentSide: "home" | "away" — the side the OPPOSING batters bat from.
+ * opponentSide: which side the OPPOSING batters bat from ("home" | "away").
  */
 export async function getLineup(
   gamePk: number,
   opponentSide: "home" | "away"
 ): Promise<LineupPlayer[]> {
-  // 1. Try the dedicated lineups endpoint (available ~2–3 hrs before first pitch)
   try {
-    const lineupUrl = `${MLB_API}/game/${gamePk}/lineups`;
-    const res = await fetch(lineupUrl, { next: { revalidate: 60 } });
-    if (res.ok) {
-      const data = await res.json() as MLBLineupsResponse;
-      const players = opponentSide === "home" ? data.homePlayers : data.awayPlayers;
-      if (players && players.length > 0) {
-        return players.map((p, idx) => ({
-          batter_id: String(p.id),
-          batter_name: p.fullName,
-          hand: (p.batSide?.code as "R" | "L" | "S") ?? null,
-          batting_order: p.lineupPosition ?? idx + 1,
-          k_pct_vs_rhp: null,
-          k_pct_vs_lhp: null
-        }));
-      }
+    const url = `${MLB_API}/schedule?sportId=1&gamePk=${gamePk}&hydrate=lineups`;
+    const res = await fetch(url, { next: { revalidate: 60 } });
+    if (!res.ok) {
+      console.error(`[mlb-stats] getLineup schedule fetch failed: ${res.status}`);
+      return [];
     }
-  } catch (err) {
-    console.error("[mlb-stats] getLineup /lineups error:", err);
-  }
 
-  // 2. Fall back to boxscore (in-progress / post-game)
-  try {
-    const boxUrl = `${MLB_API}/game/${gamePk}/boxscore`;
-    const res = await fetch(boxUrl, { next: { revalidate: 60 } });
-    if (!res.ok) return [];
-    const data = await res.json() as MLBBoxscore;
-    const targetTeam = opponentSide === "home" ? data.teams.home : data.teams.away;
-    if (!targetTeam?.battingOrder?.length) return [];
+    const data = await res.json() as MLBScheduleWithLineups;
+    const game = data.dates?.[0]?.games?.[0];
 
-    return targetTeam.battingOrder.map((playerId, idx) => {
-      const key = `ID${playerId}`;
-      const player = targetTeam.players?.[key];
-      return {
-        batter_id: String(playerId),
-        batter_name: player?.person.fullName ?? `Player ${playerId}`,
-        hand: (player?.person.batSide?.code as "R" | "L" | "S") ?? null,
-        batting_order: idx + 1,
-        k_pct_vs_rhp: null,
-        k_pct_vs_lhp: null
-      };
-    });
+    if (!game?.lineups) {
+      console.log(`[mlb-stats] getLineup: no lineups in schedule for gamePk ${gamePk}`);
+      return [];
+    }
+
+    const players =
+      opponentSide === "home"
+        ? game.lineups.homePlayers
+        : game.lineups.awayPlayers;
+
+    if (!players || players.length === 0) {
+      console.log(`[mlb-stats] getLineup: ${opponentSide}Players array empty for gamePk ${gamePk}`);
+      return [];
+    }
+
+    // Array order = batting order; batSide not provided in this endpoint
+    return players.map((p, idx) => ({
+      batter_id: String(p.id),
+      batter_name: p.fullName,
+      hand: null, // batSide not included in schedule lineup hydration
+      batting_order: idx + 1,
+      k_pct_vs_rhp: null,
+      k_pct_vs_lhp: null
+    }));
   } catch (err) {
-    console.error("[mlb-stats] getLineup boxscore fallback error:", err);
+    console.error("[mlb-stats] getLineup error:", err);
     return [];
   }
 }
