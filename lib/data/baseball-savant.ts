@@ -139,62 +139,61 @@ export async function getPitcherSeasonStats(
 }
 
 // ============================================================
-// Batter strikeout platoon splits
+// Batter strikeout platoon splits (MLB Stats API)
 // ============================================================
 
+interface MLBSplit {
+  split?: { code?: string };
+  stat?: { plateAppearances?: number; strikeOuts?: number };
+}
+
 /**
- * Fetch batter K% vs RHP and LHP from Baseball Savant.
- *
- * TODO: Baseball Savant does not have a direct single-endpoint for platoon splits
- * on arbitrary batters. The recommended production approach is to use the
- * statcast_search CSV with batter_stands filter. Below is the best approximation
- * using public endpoints.
+ * Fetch batter K% vs RHP and LHP using the MLB Stats API hitting splits.
+ * Tries current season first; falls back to prior season if sample is too small.
+ * Minimum 30 PA per split required before trusting the number.
  */
 export async function getBatterStrikeoutStats(
   batterId: number
 ): Promise<Partial<BatterStats>> {
-  try {
-    const [vsRHP, vsLHP] = await Promise.all([
-      fetchBatterKPct(batterId, "R"),
-      fetchBatterKPct(batterId, "L")
-    ]);
+  const currentYear = new Date().getFullYear();
 
-    return {
-      k_pct_vs_rhp: vsRHP ?? undefined,
-      k_pct_vs_lhp: vsLHP ?? undefined
-    } as Partial<BatterStats>;
-  } catch (err) {
-    console.error("[baseball-savant] getBatterStrikeoutStats error:", err);
-    return {};
+  for (const season of [currentYear, currentYear - 1]) {
+    try {
+      const url =
+        `https://statsapi.mlb.com/api/v1/people/${batterId}/stats` +
+        `?stats=splits&group=hitting&season=${season}`;
+
+      const res = await fetch(url, { next: { revalidate: 3600 } });
+      if (!res.ok) continue;
+
+      const data = await res.json() as { stats?: Array<{ splits?: MLBSplit[] }> };
+      const splits: MLBSplit[] = data.stats?.[0]?.splits ?? [];
+      if (splits.length === 0) continue;
+
+      const vsR = splits.find((s) => s.split?.code === "vr");
+      const vsL = splits.find((s) => s.split?.code === "vl");
+
+      const kVsR = safeKPct(vsR?.stat?.strikeOuts, vsR?.stat?.plateAppearances);
+      const kVsL = safeKPct(vsL?.stat?.strikeOuts, vsL?.stat?.plateAppearances);
+
+      if (kVsR !== null || kVsL !== null) {
+        return {
+          k_pct_vs_rhp: kVsR ?? undefined,
+          k_pct_vs_lhp: kVsL ?? undefined
+        };
+      }
+    } catch {
+      continue;
+    }
   }
+
+  console.warn(`[batter-stats] No split data found for batter ${batterId}`);
+  return {};
 }
 
-async function fetchBatterKPct(
-  batterId: number,
-  pitcherThrows: "R" | "L"
-): Promise<number | null> {
-  // Use current + prior season so early-season sparse data doesn't blank out the table.
-  // Baseball Savant requires enough PA to return K% — a full prior season fills that gap.
-  const currentYear = new Date().getFullYear();
-  const priorYear = currentYear - 1;
-  const seasonParam = `${currentYear}%7C${priorYear}%7C`; // e.g. "2026|2025|"
-
-  const url =
-    `https://baseballsavant.mlb.com/statcast_search/csv` +
-    `?hfGT=R%7C&hfSea=${seasonParam}&player_type=batter` +
-    `&pitcher_throws=${pitcherThrows}` +
-    `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
-    `&chk_stats_k_percent=on&player_id=${batterId}&type=summary`;
-
-  try {
-    const rows = await fetchCSV(url);
-    if (rows.length === 0) return null;
-    const raw = parseFloatSafe(rows[0]["k_percent"]) ?? parseFloatSafe(rows[0]["k%"]);
-    if (raw === null) return null;
-    return raw > 1 ? raw / 100 : raw;
-  } catch {
-    return null;
-  }
+function safeKPct(ks?: number, pa?: number): number | null {
+  if (ks == null || pa == null || pa < 30) return null;
+  return ks / pa;
 }
 
 // ============================================================

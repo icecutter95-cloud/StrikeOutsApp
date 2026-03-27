@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
               .eq("batter_id", batter.batter_id)
               .single();
 
-            if (batterCache) {
+            if (batterCache && (batterCache.k_pct_vs_rhp !== null || batterCache.k_pct_vs_lhp !== null)) {
               return {
                 ...batter,
                 k_pct_vs_rhp: batterCache.k_pct_vs_rhp ?? null,
