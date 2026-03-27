@@ -148,8 +148,8 @@ interface MLBSplit {
 }
 
 /**
- * Fetch batter K% vs RHP and LHP using the MLB Stats API hitting splits.
- * Tries current season first; falls back to prior season if sample is too small.
+ * Fetch batter K% vs RHP and LHP using the MLB Stats API statSplits endpoint.
+ * Tries current season first (statSplits), then falls back to career (careerStatSplits).
  * Minimum 30 PA per split required before trusting the number.
  */
 export async function getBatterStrikeoutStats(
@@ -157,38 +157,55 @@ export async function getBatterStrikeoutStats(
 ): Promise<Partial<BatterStats>> {
   const currentYear = new Date().getFullYear();
 
-  for (const season of [currentYear, currentYear - 1]) {
-    try {
-      const url =
-        `https://statsapi.mlb.com/api/v1/people/${batterId}/stats` +
-        `?stats=splits&group=hitting&season=${season}`;
+  // Attempt 1: current season statSplits
+  const seasonResult = await fetchStatSplits(
+    `https://statsapi.mlb.com/api/v1/people/${batterId}/stats` +
+    `?stats=statSplits&group=hitting&season=${currentYear}&sitCodes=vl,vr`
+  );
+  if (seasonResult) return seasonResult;
 
-      const res = await fetch(url, { next: { revalidate: 3600 } });
-      if (!res.ok) continue;
+  // Attempt 2: prior season statSplits (early in season, sample too small)
+  const priorResult = await fetchStatSplits(
+    `https://statsapi.mlb.com/api/v1/people/${batterId}/stats` +
+    `?stats=statSplits&group=hitting&season=${currentYear - 1}&sitCodes=vl,vr`
+  );
+  if (priorResult) return priorResult;
 
-      const data = await res.json() as { stats?: Array<{ splits?: MLBSplit[] }> };
-      const splits: MLBSplit[] = data.stats?.[0]?.splits ?? [];
-      if (splits.length === 0) continue;
-
-      const vsR = splits.find((s) => s.split?.code === "vr");
-      const vsL = splits.find((s) => s.split?.code === "vl");
-
-      const kVsR = safeKPct(vsR?.stat?.strikeOuts, vsR?.stat?.plateAppearances);
-      const kVsL = safeKPct(vsL?.stat?.strikeOuts, vsL?.stat?.plateAppearances);
-
-      if (kVsR !== null || kVsL !== null) {
-        return {
-          k_pct_vs_rhp: kVsR ?? undefined,
-          k_pct_vs_lhp: kVsL ?? undefined
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
+  // Attempt 3: career splits as last resort
+  const careerResult = await fetchStatSplits(
+    `https://statsapi.mlb.com/api/v1/people/${batterId}/stats` +
+    `?stats=careerStatSplits&group=hitting&sitCodes=vl,vr`
+  );
+  if (careerResult) return careerResult;
 
   console.warn(`[batter-stats] No split data found for batter ${batterId}`);
   return {};
+}
+
+async function fetchStatSplits(url: string): Promise<Partial<BatterStats> | null> {
+  try {
+    const res = await fetch(url, { next: { revalidate: 3600 } });
+    if (!res.ok) return null;
+
+    const data = await res.json() as { stats?: Array<{ splits?: MLBSplit[] }> };
+    const splits: MLBSplit[] = data.stats?.[0]?.splits ?? [];
+    if (splits.length === 0) return null;
+
+    const vsR = splits.find((s) => s.split?.code === "vr");
+    const vsL = splits.find((s) => s.split?.code === "vl");
+
+    const kVsR = safeKPct(vsR?.stat?.strikeOuts, vsR?.stat?.plateAppearances);
+    const kVsL = safeKPct(vsL?.stat?.strikeOuts, vsL?.stat?.plateAppearances);
+
+    if (kVsR === null && kVsL === null) return null;
+
+    return {
+      k_pct_vs_rhp: kVsR ?? undefined,
+      k_pct_vs_lhp: kVsL ?? undefined
+    };
+  } catch {
+    return null;
+  }
 }
 
 function safeKPct(ks?: number, pa?: number): number | null {
