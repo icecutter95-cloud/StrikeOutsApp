@@ -138,14 +138,17 @@ export function toDateString(date: Date): string {
 }
 
 /**
- * Format a game time ISO string to a readable local time like "7:05 PM".
+ * Format a game time ISO string to Eastern Time, e.g. "7:05 PM ET".
  */
 export function formatGameTime(isoString: string | null): string {
   if (!isoString) return "TBD";
   const d = new Date(isoString);
-  return d.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  });
+  return (
+    d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/New_York"
+    }) + " ET"
+  );
 }
