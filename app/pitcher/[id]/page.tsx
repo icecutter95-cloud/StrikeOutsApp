@@ -166,11 +166,24 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
                 value={prediction.weather_modifier?.toFixed(3) ?? "1.000"}
               />
               <StatRow
-                label="Lineup K Vulnerability"
+                label="Lineup Weighted K Rate"
                 value={
                   prediction.lineup_k_vulnerability !== null
                     ? `${(prediction.lineup_k_vulnerability * 100).toFixed(1)}%`
                     : "—"
+                }
+                sub={(() => {
+                  if (prediction.lineup_k_vulnerability === null) return undefined;
+                  const diff = (prediction.lineup_k_vulnerability - 0.225) * 100;
+                  const sign = diff >= 0 ? "+" : "";
+                  return `${sign}${diff.toFixed(1)}% vs lg avg`;
+                })()}
+                subColor={
+                  prediction.lineup_k_vulnerability === null
+                    ? "neutral"
+                    : prediction.lineup_k_vulnerability > 0.225
+                    ? "green"
+                    : "red"
                 }
               />
               <StatRow
@@ -328,11 +341,33 @@ function BigStatCard({
   );
 }
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function StatRow({
+  label,
+  value,
+  sub,
+  subColor
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  subColor?: "green" | "red" | "neutral";
+}) {
+  const subClass =
+    subColor === "green"
+      ? "text-green-400"
+      : subColor === "red"
+      ? "text-red-400"
+      : "text-slate-500";
+
   return (
     <tr>
       <td className="py-2 text-slate-400">{label}</td>
-      <td className="py-2 text-right font-medium text-slate-200">{value}</td>
+      <td className="py-2 text-right font-medium text-slate-200">
+        {value}
+        {sub && (
+          <span className={`ml-2 text-xs font-normal ${subClass}`}>{sub}</span>
+        )}
+      </td>
     </tr>
   );
 }
