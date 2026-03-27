@@ -208,6 +208,7 @@ export async function POST(req: NextRequest) {
           },
           lineup_confirmation_status: projection.lineup_confirmation_status,
           lineup_k_vulnerability: projection.lineup_k_vulnerability,
+          lineup_data: enrichedLineup.length > 0 ? enrichedLineup : null,
           prop_line: matchedProp?.line ?? null,
           prop_odds_over: matchedProp?.odds_over ?? null,
           prop_odds_under: matchedProp?.odds_under ?? null,

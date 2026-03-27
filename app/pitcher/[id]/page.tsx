@@ -293,7 +293,7 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
       <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
         <h2 className="mb-4 text-lg font-semibold text-white">Lineup Matchup</h2>
         <LineupTable
-          predictionId={prediction.id}
+          lineupData={prediction.lineup_data ?? null}
           pitcherHand={prediction.pitcher_hand ?? "R"}
           lineupStatus={prediction.lineup_confirmation_status ?? "unconfirmed"}
         />

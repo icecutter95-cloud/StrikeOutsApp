@@ -1,54 +1,18 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import type { BatterStats } from "@/lib/types";
+import type { LineupPlayer } from "@/lib/types";
 
 interface LineupTableProps {
-  predictionId: string;
+  lineupData: LineupPlayer[] | null;
   pitcherHand: "R" | "L";
   lineupStatus: "confirmed" | "partial" | "unconfirmed";
-}
-
-interface LineupRow extends Partial<BatterStats> {
-  batter_id: string;
-  batter_name: string;
-  batting_order: number;
-  hand: string | null;
 }
 
 const HIGH_K_THRESHOLD = 0.30;
 
 export default function LineupTable({
-  predictionId,
+  lineupData,
   pitcherHand,
   lineupStatus
 }: LineupTableProps) {
-  const [lineup, setLineup] = useState<LineupRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // In a real app, lineup would be stored per prediction.
-    // Here we fetch batter_stats_cache for batters associated with this prediction.
-    // For now, we show a placeholder that fetches from the cache.
-    const load = async () => {
-      const supabase = createClient();
-      // Attempt to load cached batters — limited since we don't store lineup per prediction yet
-      const { data } = await supabase
-        .from("batter_stats_cache")
-        .select("*")
-        .limit(9);
-      setLineup(
-        (data ?? []).map((b: BatterStats, idx: number) => ({
-          ...b,
-          batting_order: idx + 1
-        }))
-      );
-      setLoading(false);
-    };
-    load();
-  }, [predictionId]);
-
   if (lineupStatus === "unconfirmed") {
     return (
       <div className="rounded-lg border border-yellow-700 bg-yellow-900/20 p-4 text-center">
@@ -60,17 +24,7 @@ export default function LineupTable({
     );
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="h-8 animate-pulse rounded bg-slate-700" />
-        ))}
-      </div>
-    );
-  }
-
-  if (lineup.length === 0) {
+  if (!lineupData || lineupData.length === 0) {
     return (
       <p className="text-sm text-slate-500">No lineup data available.</p>
     );
@@ -100,7 +54,7 @@ export default function LineupTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50">
-            {lineup.map((batter) => {
+            {lineupData.map((batter) => {
               const kPct =
                 pitcherHand === "R" ? batter.k_pct_vs_rhp : batter.k_pct_vs_lhp;
               const isHighK = kPct !== null && kPct !== undefined && kPct > HIGH_K_THRESHOLD;
@@ -122,9 +76,7 @@ export default function LineupTable({
                   </td>
                   <td className="py-2 text-right">
                     {kPct !== null && kPct !== undefined ? (
-                      <span
-                        className={isHighK ? "font-semibold text-red-400" : "text-slate-300"}
-                      >
+                      <span className={isHighK ? "font-semibold text-red-400" : "text-slate-300"}>
                         {(kPct * 100).toFixed(1)}%
                       </span>
                     ) : (

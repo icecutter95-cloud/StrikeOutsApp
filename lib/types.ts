@@ -36,6 +36,7 @@ export interface Prediction {
   // Lineup
   lineup_confirmation_status: "confirmed" | "partial" | "unconfirmed" | null;
   lineup_k_vulnerability: number | null;
+  lineup_data: LineupPlayer[] | null;
 
   // Odds / line
   prop_line: number | null;
