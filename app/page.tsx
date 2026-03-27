@@ -5,20 +5,24 @@ import PitcherCard from "@/components/PitcherCard";
 import DashboardControls from "@/components/DashboardControls";
 
 interface PageProps {
-  searchParams: { date?: string };
+  searchParams: { date?: string; sort?: string };
 }
 
 export const revalidate = 0; // Always fetch fresh
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const date = searchParams.date ?? toDateString(new Date());
+  const sort = searchParams.sort === "time" ? "time" : "edge";
 
   const supabase = await createClient();
   const { data: predictions, error } = await supabase
     .from("predictions")
     .select("*")
     .eq("game_date", date)
-    .order("edge_pct", { ascending: false });
+    .order(
+      sort === "time" ? "game_time" : "edge_pct",
+      { ascending: sort === "time" }
+    );
 
   const allPredictions = (predictions ?? []) as Prediction[];
 
@@ -42,7 +46,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             MLB Pitcher Strikeout Props — {formatDate(date)}
           </p>
         </div>
-        <DashboardControls date={date} />
+        <DashboardControls date={date} sort={sort} />
       </div>
 
       {/* Summary bar */}

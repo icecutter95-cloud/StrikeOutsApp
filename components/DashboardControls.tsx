@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 
 interface DashboardControlsProps {
   date: string;
+  sort: "edge" | "time";
 }
 
-export default function DashboardControls({ date }: DashboardControlsProps) {
+export default function DashboardControls({ date, sort }: DashboardControlsProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -36,7 +37,11 @@ export default function DashboardControls({ date }: DashboardControlsProps) {
   };
 
   const handleDateChange = (newDate: string) => {
-    router.push(`/?date=${newDate}`);
+    router.push(`/?date=${newDate}&sort=${sort}`);
+  };
+
+  const handleSort = (newSort: "edge" | "time") => {
+    router.push(`/?date=${date}&sort=${newSort}`);
   };
 
   return (
@@ -44,6 +49,31 @@ export default function DashboardControls({ date }: DashboardControlsProps) {
       {message && (
         <span className="text-sm text-slate-400">{message}</span>
       )}
+
+      {/* Sort toggle */}
+      <div className="flex rounded-lg border border-slate-600 overflow-hidden text-sm font-medium">
+        <button
+          onClick={() => handleSort("edge")}
+          className={`px-3 py-2 transition-colors ${
+            sort === "edge"
+              ? "bg-brand text-white"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+          }`}
+        >
+          Edge %
+        </button>
+        <button
+          onClick={() => handleSort("time")}
+          className={`px-3 py-2 transition-colors border-l border-slate-600 ${
+            sort === "time"
+              ? "bg-brand text-white"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+          }`}
+        >
+          Game Time
+        </button>
+      </div>
+
       <input
         type="date"
         value={date}
