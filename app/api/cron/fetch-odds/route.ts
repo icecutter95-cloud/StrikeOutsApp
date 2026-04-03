@@ -21,12 +21,14 @@ export async function GET(req: NextRequest) {
     const date = toDateString(new Date());
     const supabase = await createServiceClient();
 
-    // Fetch all open predictions for today
+    // Fetch open predictions for today where the game hasn't started yet
+    const nowIso = new Date().toISOString();
     const { data: predictions, error: predErr } = await supabase
       .from("predictions")
       .select("*")
       .eq("game_date", date)
-      .neq("game_status", "final");
+      .neq("game_status", "final")
+      .gt("game_time", nowIso);
 
     if (predErr) {
       return NextResponse.json({ error: predErr.message }, { status: 500 });

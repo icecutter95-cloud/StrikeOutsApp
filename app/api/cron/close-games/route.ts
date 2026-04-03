@@ -61,11 +61,12 @@ export async function GET(req: NextRequest) {
           continue;
         }
 
-        // Fetch closing line (latest snapshot)
+        // Fetch closing line = last snapshot taken BEFORE game started (pre-game close)
         const { data: lastSnapshot } = await supabase
           .from("line_snapshots")
           .select("line")
           .eq("prediction_id", prediction.id)
+          .lte("created_at", prediction.game_time ?? new Date().toISOString())
           .order("created_at", { ascending: false })
           .limit(1)
           .single();
@@ -124,43 +125,61 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * Resolves a gamePk (MLB game ID) for a prediction by querying the schedule
- * for that game_date and matching the pitcher name / team.
+ * Resolves a gamePk by fetching the schedule for that date, then checking each
+ * game's boxscore player list for the pitcher ID.
  *
- * This is needed because gamePk is not stored in the predictions table.
- * A more robust approach would store game_id at prediction creation time.
+ * Uses the boxscore (not probablePitcher) so it works even when the actual
+ * starter differed from the listed probable pitcher.
  */
 async function resolveGamePk(prediction: Prediction): Promise<number | null> {
   try {
-    const url =
-      `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${prediction.game_date}` +
-      `&hydrate=probablePitcher`;
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
+    // Step 1: Get all gamePks for that date
+    const schedUrl =
+      `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${prediction.game_date}&sportId=1`;
+    const schedRes = await fetch(schedUrl, { cache: "no-store" });
+    if (!schedRes.ok) return null;
 
-    const data = await res.json() as {
-      dates?: Array<{
-        games: Array<{
-          gamePk: number;
-          teams: {
-            home: { team: { abbreviation?: string }; probablePitcher?: { id: number } };
-            away: { team: { abbreviation?: string }; probablePitcher?: { id: number } };
-          };
-        }>;
-      }>;
+    const schedData = await schedRes.json() as {
+      dates?: Array<{ games: Array<{ gamePk: number }> }>;
     };
 
-    const pitcherIdNum = parseInt(prediction.pitcher_id, 10);
-
-    for (const dateObj of data.dates ?? []) {
-      for (const game of dateObj.games ?? []) {
-        const homePitcher = game.teams.home.probablePitcher?.id;
-        const awayPitcher = game.teams.away.probablePitcher?.id;
-        if (homePitcher === pitcherIdNum || awayPitcher === pitcherIdNum) {
-          return game.gamePk;
-        }
+    const gamePks: number[] = [];
+    for (const d of schedData.dates ?? []) {
+      for (const g of d.games ?? []) {
+        gamePks.push(g.gamePk);
       }
     }
+
+    const pitcherIdNum = parseInt(prediction.pitcher_id, 10);
+    const pitcherKey = `ID${pitcherIdNum}`;
+
+    // Step 2: Check each game's boxscore for this pitcher in the player list
+    for (const gamePk of gamePks) {
+      try {
+        const boxUrl = `https://statsapi.mlb.com/api/v1/game/${gamePk}/boxscore`;
+        const boxRes = await fetch(boxUrl, { cache: "no-store" });
+        if (!boxRes.ok) continue;
+
+        const box = await boxRes.json() as {
+          teams: {
+            home: { players: Record<string, unknown> };
+            away: { players: Record<string, unknown> };
+          };
+        };
+
+        const allPlayers = {
+          ...box.teams.home.players,
+          ...box.teams.away.players
+        };
+
+        if (pitcherKey in allPlayers) {
+          return gamePk;
+        }
+      } catch {
+        continue;
+      }
+    }
+
     return null;
   } catch {
     return null;

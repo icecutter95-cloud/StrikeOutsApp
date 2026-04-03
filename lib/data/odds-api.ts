@@ -2,8 +2,8 @@ import type { OddsProp } from "@/lib/types";
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
 
-// Preferred books in priority order
-const BOOK_PRIORITY = ["draftkings", "fanduel", "betmgm", "caesars", "pointsbet"];
+// Single book source — DraftKings only for consistency
+const BOOK_PRIORITY = ["draftkings"];
 
 // ============================================================
 // Raw API response types
