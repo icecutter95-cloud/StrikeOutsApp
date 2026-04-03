@@ -10,7 +10,7 @@ interface PageProps {
     page?: string;
     date_from?: string;
     date_to?: string;
-    edge_tier?: string;
+    edge_tier?: string;   // min value as string e.g. "0.04"
     lineup_status?: string;
     bet_placed?: string;
   };
@@ -38,6 +38,12 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   if (searchParams.date_to) {
     query = query.lte("game_date", searchParams.date_to);
   }
+  if (activeTierMin !== null) {
+    const activeTier = edgeTiers.find((t) => t.min === activeTierMin);
+    if (activeTier) {
+      query = query.gte("edge_pct", activeTier.min).lt("edge_pct", activeTier.max);
+    }
+  }
   if (searchParams.lineup_status) {
     query = query.eq("lineup_confirmation_status", searchParams.lineup_status);
   }
@@ -60,13 +66,17 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
   // Stats by edge tier
   const edgeTiers = [
-    { label: "4–6.9%",  min: 0.04, max: 0.07 },
-    { label: "7–9.9%",  min: 0.07, max: 0.10 },
+    { label: "4–6.9%",   min: 0.04, max: 0.07 },
+    { label: "7–9.9%",   min: 0.07, max: 0.10 },
     { label: "10–14.9%", min: 0.10, max: 0.15 },
     { label: "15–19.9%", min: 0.15, max: 0.20 },
     { label: "20–29.9%", min: 0.20, max: 0.30 },
-    { label: "30%+",     min: 0.30, max: 1.0  }
+    { label: "30%+",     min: 0.30, max: 1.0  },
   ];
+
+  const activeTierMin = searchParams.edge_tier
+    ? parseFloat(searchParams.edge_tier)
+    : null;
 
   const tierStats = edgeTiers.map((tier) => {
     const tiered = allPredictions.filter(
@@ -77,10 +87,11 @@ export default async function HistoryPage({ searchParams }: PageProps) {
         p.edge_pct < tier.max &&
         p.recommendation !== "NO_BET"
     );
+
     const withResult = tiered.filter((p) => p.model_correct !== null);
     const correct = withResult.filter((p) => p.model_correct).length;
-    const wins = tiered.filter((p) => p.bet_result === "win").length;
-    const losses = tiered.filter((p) => p.bet_result === "loss").length;
+    const wins = tiered.filter((p) => p.model_correct === true).length;
+    const losses = tiered.filter((p) => p.model_correct === false).length;
     const units = tiered
       .filter((p) => p.bet_result)
       .reduce((sum, p) => {
@@ -90,6 +101,8 @@ export default async function HistoryPage({ searchParams }: PageProps) {
       }, 0);
     return {
       tier: tier.label,
+      min: tier.min,
+      max: tier.max,
       bets: tiered.length,
       accuracy:
         withResult.length > 0 ? (correct / withResult.length) * 100 : null,
@@ -133,7 +146,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
       {/* Stats by edge tier */}
       <section>
         <h2 className="mb-3 text-lg font-semibold text-white">Performance by Edge Tier</h2>
-        <StatsTable tierStats={tierStats} />
+        <StatsTable tierStats={tierStats} activeTierMin={activeTierMin} />
       </section>
 
       {/* Filters */}
