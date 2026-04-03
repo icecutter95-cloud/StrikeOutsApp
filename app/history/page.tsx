@@ -24,6 +24,20 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
   const supabase = await createClient();
 
+  // Edge tier definitions — declared early so query filtering can reference them
+  const edgeTiers = [
+    { label: "4–6.9%",   min: 0.04, max: 0.07 },
+    { label: "7–9.9%",   min: 0.07, max: 0.10 },
+    { label: "10–14.9%", min: 0.10, max: 0.15 },
+    { label: "15–19.9%", min: 0.15, max: 0.20 },
+    { label: "20–29.9%", min: 0.20, max: 0.30 },
+    { label: "30%+",     min: 0.30, max: 1.0  },
+  ];
+
+  const activeTierMin = searchParams.edge_tier
+    ? parseFloat(searchParams.edge_tier)
+    : null;
+
   // Build query
   let query = supabase
     .from("predictions")
@@ -65,19 +79,6 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   const allPredictions = (allFinal ?? []) as Partial<Prediction>[];
 
   // Stats by edge tier
-  const edgeTiers = [
-    { label: "4–6.9%",   min: 0.04, max: 0.07 },
-    { label: "7–9.9%",   min: 0.07, max: 0.10 },
-    { label: "10–14.9%", min: 0.10, max: 0.15 },
-    { label: "15–19.9%", min: 0.15, max: 0.20 },
-    { label: "20–29.9%", min: 0.20, max: 0.30 },
-    { label: "30%+",     min: 0.30, max: 1.0  },
-  ];
-
-  const activeTierMin = searchParams.edge_tier
-    ? parseFloat(searchParams.edge_tier)
-    : null;
-
   const tierStats = edgeTiers.map((tier) => {
     const tiered = allPredictions.filter(
       (p) =>
