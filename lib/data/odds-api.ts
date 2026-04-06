@@ -254,5 +254,11 @@ export function matchPropToPitcher(
 }
 
 function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z ]/g, "").trim();
+  // Decompose accented chars (é→e+combining, á→a+combining) then strip combining marks
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip combining diacritical marks
+    .toLowerCase()
+    .replace(/[^a-z ]/g, "")
+    .trim();
 }
