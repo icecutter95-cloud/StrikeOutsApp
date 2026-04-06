@@ -166,6 +166,37 @@ export async function POST(req: NextRequest) {
         // --- Prop line ---
         const matchedProp = matchPropToPitcher(allProps, game.pitcher_name, game.pitcher_id);
 
+        // If the game has already started and the API is no longer returning a line,
+        // preserve the existing odds/edge/recommendation from the DB so we don't wipe history.
+        const gameHasStarted = new Date(game.game_time) < new Date();
+        let existingOdds: {
+          prop_line: number | null;
+          prop_odds_over: number | null;
+          prop_odds_under: number | null;
+          opening_line: number | null;
+          edge_pct: number | null;
+          model_prob_over: number | null;
+          model_prob_under: number | null;
+          book_implied_over: number | null;
+          book_implied_under: number | null;
+          recommendation: string | null;
+          recommended_units: number | null;
+        } | null = null;
+
+        if (gameHasStarted && !matchedProp) {
+          const { data: existing } = await supabase
+            .from("predictions")
+            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units")
+            .eq("pitcher_id", game.pitcher_id)
+            .eq("game_date", date)
+            .single();
+          existingOdds = existing ?? null;
+        }
+
+        const propLine = matchedProp?.line ?? existingOdds?.prop_line ?? null;
+        const propOddsOver = matchedProp?.odds_over ?? existingOdds?.prop_odds_over ?? null;
+        const propOddsUnder = matchedProp?.odds_under ?? existingOdds?.prop_odds_under ?? null;
+
         // --- Weather ---
         const weatherMod = await getWeatherModifier(game.venue, new Date(game.game_time));
 
@@ -176,9 +207,9 @@ export async function POST(req: NextRequest) {
           game.pitcher_hand ?? "R",
           game.venue,
           new Date(game.game_time),
-          matchedProp?.line ?? null,
-          matchedProp?.odds_over ?? null,
-          matchedProp?.odds_under ?? null,
+          propLine,
+          propOddsOver,
+          propOddsUnder,
           config,
           weatherMod
         );
@@ -209,16 +240,17 @@ export async function POST(req: NextRequest) {
           lineup_confirmation_status: projection.lineup_confirmation_status,
           lineup_k_vulnerability: projection.lineup_k_vulnerability,
           lineup_data: enrichedLineup.length > 0 ? enrichedLineup : null,
-          prop_line: matchedProp?.line ?? null,
-          prop_odds_over: matchedProp?.odds_over ?? null,
-          prop_odds_under: matchedProp?.odds_under ?? null,
-          edge_pct: projection.edge_pct,
-          model_prob_over: projection.model_prob_over,
-          model_prob_under: projection.model_prob_under,
-          book_implied_over: projection.book_implied_over,
-          book_implied_under: projection.book_implied_under,
-          recommendation: projection.recommendation,
-          recommended_units: projection.recommended_units,
+          prop_line: propLine,
+          prop_odds_over: propOddsOver,
+          prop_odds_under: propOddsUnder,
+          opening_line: existingOdds?.opening_line ?? null,
+          edge_pct: existingOdds && !matchedProp ? existingOdds.edge_pct : projection.edge_pct,
+          model_prob_over: existingOdds && !matchedProp ? existingOdds.model_prob_over : projection.model_prob_over,
+          model_prob_under: existingOdds && !matchedProp ? existingOdds.model_prob_under : projection.model_prob_under,
+          book_implied_over: existingOdds && !matchedProp ? existingOdds.book_implied_over : projection.book_implied_over,
+          book_implied_under: existingOdds && !matchedProp ? existingOdds.book_implied_under : projection.book_implied_under,
+          recommendation: existingOdds && !matchedProp ? existingOdds.recommendation : projection.recommendation,
+          recommended_units: existingOdds && !matchedProp ? existingOdds.recommended_units : projection.recommended_units,
           projected_ip: projection.projected_ip,
           park_factor: projection.park_factor,
           weather_modifier: projection.weather_modifier,
