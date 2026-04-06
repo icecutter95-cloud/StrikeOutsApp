@@ -148,7 +148,9 @@ function parseKProps(data: OddsAPIEventOdds, eventId: string): OddsProp[] {
     >();
 
     for (const outcome of market.outcomes) {
-      const pitcherName = outcome.description ?? outcome.name;
+      // description is the pitcher name on most books; strip any trailing qualifier
+      const rawDesc = outcome.description ?? "";
+      const pitcherName = rawDesc.split(" - ")[0].trim() || null;
       if (!pitcherName) continue;
       const isOver = outcome.name === "Over";
       const isUnder = outcome.name === "Under";
@@ -163,7 +165,11 @@ function parseKProps(data: OddsAPIEventOdds, eventId: string): OddsProp[] {
       pitcherOutcomes.set(pitcherName, existing);
     }
 
-    // For each pitcher, check if this book is preferred over what we have
+    // Only process books in our priority list — skip everything else
+    const thisPriority = BOOK_PRIORITY.indexOf(book.key);
+    if (thisPriority === -1) continue;
+
+    // For each pitcher, store if this book is higher priority than what we have
     for (const [pitcherName, outcomes] of pitcherOutcomes) {
       if (!outcomes.over || !outcomes.under) continue;
 
@@ -171,10 +177,8 @@ function parseKProps(data: OddsAPIEventOdds, eventId: string): OddsProp[] {
       const currentPriority = currentBest
         ? BOOK_PRIORITY.indexOf(currentBest.book_key)
         : Infinity;
-      const thisPriority = BOOK_PRIORITY.indexOf(book.key);
 
-      // Prefer books in priority order; if neither is in list, accept first found
-      if (currentBest === undefined || thisPriority < currentPriority || currentPriority === -1) {
+      if (currentBest === undefined || thisPriority < currentPriority) {
         pitcherMap.set(pitcherName, {
           line: outcomes.point,
           odds_over: outcomes.over.price,
@@ -203,7 +207,7 @@ function parseKProps(data: OddsAPIEventOdds, eventId: string): OddsProp[] {
 
 /**
  * Matches an OddsProp pitcher to a known pitcher name from game info.
- * Simple fuzzy match: normalize to lowercase, compare last name.
+ * Tries: exact → last name + first initial → last name only.
  */
 export function matchPropToPitcher(
   props: OddsProp[],
@@ -211,20 +215,38 @@ export function matchPropToPitcher(
   pitcherId: string
 ): OddsProp | null {
   const normalizedTarget = normalizeName(pitcherName);
+  const targetParts = normalizedTarget.split(" ");
+  const targetLast = targetParts[targetParts.length - 1] ?? "";
+  const targetFirstInitial = targetParts[0]?.[0] ?? "";
 
-  // Exact match first
+  // 1. Exact match
   for (const prop of props) {
     if (normalizeName(prop.pitcher_name) === normalizedTarget) {
       return { ...prop, pitcher_id: pitcherId };
     }
   }
 
-  // Last name match fallback
-  const targetLastName = normalizedTarget.split(" ").pop() ?? "";
-  for (const prop of props) {
-    const propLastName = normalizeName(prop.pitcher_name).split(" ").pop() ?? "";
-    if (propLastName === targetLastName && targetLastName.length > 3) {
-      return { ...prop, pitcher_id: pitcherId };
+  // 2. Last name + first initial (handles "C. Sale" → "Chris Sale")
+  if (targetLast.length > 3) {
+    for (const prop of props) {
+      const propNorm = normalizeName(prop.pitcher_name);
+      const propParts = propNorm.split(" ");
+      const propLast = propParts[propParts.length - 1] ?? "";
+      const propFirstInitial = propParts[0]?.[0] ?? "";
+      if (propLast === targetLast && propFirstInitial === targetFirstInitial) {
+        return { ...prop, pitcher_id: pitcherId };
+      }
+    }
+  }
+
+  // 3. Last name only fallback (only if last name is long enough to be unambiguous)
+  if (targetLast.length > 4) {
+    for (const prop of props) {
+      const propNorm = normalizeName(prop.pitcher_name);
+      const propLast = propNorm.split(" ").pop() ?? "";
+      if (propLast === targetLast) {
+        return { ...prop, pitcher_id: pitcherId };
+      }
     }
   }
 
