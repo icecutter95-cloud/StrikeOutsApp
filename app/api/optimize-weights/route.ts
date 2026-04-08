@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
 
   if (error || !data || data.length < 10) {
     return NextResponse.json(
-      { error: data?.length < 10 ? "Need at least 10 completed predictions to optimize" : error?.message },
+      { error: (data?.length ?? 0) < 10 ? "Need at least 10 completed predictions to optimize" : error?.message },
       { status: 400 }
     );
   }
