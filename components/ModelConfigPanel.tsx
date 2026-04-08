@@ -57,7 +57,7 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
   const pieData = [
     { name: "Last 3 Starts", value: config.weight_last3 },
     { name: "Season K%", value: config.weight_season },
-    { name: "CSW%", value: config.weight_csw },
+    { name: "SwStr%", value: config.weight_csw },
     { name: "xFIP", value: config.weight_xfip }
   ];
 
@@ -172,7 +172,7 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
               color={WEIGHT_COLORS[1]}
             />
             <WeightSlider
-              label="CSW%"
+              label="SwStr% (Stuff Quality)"
               field="weight_csw"
               value={config.weight_csw}
               onChange={handleWeightChange}
@@ -363,7 +363,7 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
               </thead>
               <tbody className="divide-y divide-slate-600/50">
                 {(["last3", "season", "csw", "xfip"] as const).map((key) => {
-                  const labels = { last3: "Last 3 Starts", season: "Season K%", csw: "CSW%", xfip: "xFIP" };
+                  const labels = { last3: "Last 3 Starts", season: "Season K%", csw: "SwStr%", xfip: "xFIP" };
                   const curr = optimizerResult.current_weights[key];
                   const sugg = optimizerResult.suggested_weights[key];
                   const diff = sugg - curr;

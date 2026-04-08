@@ -16,8 +16,6 @@ import {
 // League average K% (2024 MLB: ~22.5%)
 const LEAGUE_AVG_K_PCT = 0.225;
 
-// League average SwStr% (2024 MLB: ~10.5%)
-const LEAGUE_AVG_SWSTR = 0.105;
 // League average O-Swing% (2024 MLB: ~30%)
 const LEAGUE_AVG_OSWING = 0.30;
 
@@ -29,6 +27,10 @@ const MIN_IP = 3.0;
 // CSW calibration: CSW% of ~28% ≈ 7 K/9 historically
 // Linear: K/9 ≈ CSW% * 25 (empirical)
 const CSW_CALIBRATION = 25;
+
+// SwStr% calibration: league avg SwStr% ~10.5% ≈ 8.5 K/9 historically
+// Linear: K/9 ≈ SwStr% * 81 (empirical — used when CSW% is unavailable)
+const SWSTR_K9_CALIBRATION = 81;
 
 // Confidence interval half-width (Poisson 80% CI approximation)
 const CI_HALF_WIDTH = 1.5;
@@ -72,13 +74,6 @@ function getSeasonalWeights(
 // ============================================================
 // Stuff quality & velocity helpers
 // ============================================================
-
-function computeSwStrMultiplier(stats: PitcherStats): number {
-  if (stats.swstr_pct === null) return 1.0;
-  // Dampened power function: elite SwStr% (15%) → ~1.09x, weak (7%) → ~0.92x
-  const ratio = stats.swstr_pct / LEAGUE_AVG_SWSTR;
-  return Math.max(0.85, Math.min(1.15, Math.pow(ratio, 0.4)));
-}
 
 function computeOSwingMultiplier(stats: PitcherStats): number {
   if (stats.o_swing_pct === null) return 1.0;
@@ -208,11 +203,11 @@ export async function generateProjection(
   // ----------------------------------------------------------
   // Step 6b: Stuff quality & velocity multipliers
   // ----------------------------------------------------------
-  const swStrMultiplier = computeSwStrMultiplier(pitcherStats);
+  // SwStr% is already incorporated into the weight blend via computeCSWK9 — not double-counted here.
   const oSwingMultiplier = computeOSwingMultiplier(pitcherStats);
   const velocityMultiplier = computeVelocityMultiplier(pitcherStats);
 
-  const adjustedProjectedKs = projectedKs * swStrMultiplier * oSwingMultiplier * velocityMultiplier;
+  const adjustedProjectedKs = projectedKs * oSwingMultiplier * velocityMultiplier;
 
   // ----------------------------------------------------------
   // Step 7: Confidence interval (±CI or Poisson 80% CI)
@@ -315,9 +310,20 @@ function computeSeasonK9(stats: PitcherStats): number {
 }
 
 function computeCSWK9(stats: PitcherStats): number {
-  if (stats.csw_pct === null) return 7.5;
-  const pct = stats.csw_pct > 1 ? stats.csw_pct / 100 : stats.csw_pct;
-  return pct * CSW_CALIBRATION;
+  // Prefer SwStr% (reliably fetched from Savant game log) over CSW%
+  // (CSW% requires a different endpoint and is currently unavailable).
+  // Both measure bat-missing ability — SwStr% is whiffs only, CSW% adds called strikes.
+  // SwStr% calibration: 10.5% avg ≈ 8.5 K/9 → K/9 = swstr_pct * 81
+  if (stats.swstr_pct !== null) {
+    const pct = stats.swstr_pct > 1 ? stats.swstr_pct / 100 : stats.swstr_pct;
+    return pct * SWSTR_K9_CALIBRATION;
+  }
+  // Fallback to CSW% if ever available
+  if (stats.csw_pct !== null) {
+    const pct = stats.csw_pct > 1 ? stats.csw_pct / 100 : stats.csw_pct;
+    return pct * CSW_CALIBRATION;
+  }
+  return 7.5; // league average fallback
 }
 
 function computeXFIPK9(stats: PitcherStats): number {
