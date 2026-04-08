@@ -36,6 +36,13 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
 
   const prediction = predictions[0] as Prediction;
 
+  // Fetch pitcher stats cache for additional metrics
+  const { data: pitcherCache } = await supabase
+    .from("pitcher_stats_cache")
+    .select("swstr_pct,o_swing_pct,season_avg_velocity,last3_avg_velocity,k_pct_vs_lhh,k_pct_vs_rhh")
+    .eq("pitcher_id", params.id)
+    .single();
+
   // Fetch line snapshots
   const { data: snapshots } = await supabase
     .from("line_snapshots")
@@ -294,6 +301,62 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
         </section>
       </div>
 
+      {/* Pitcher metrics */}
+      {pitcherCache && (
+        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+          <h2 className="mb-4 text-lg font-semibold text-white">Pitcher Stuff Metrics</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <MetricCard
+              label="SwStr%"
+              value={pitcherCache.swstr_pct !== null ? `${(pitcherCache.swstr_pct * 100).toFixed(1)}%` : "—"}
+              sub="League avg: 10.5%"
+              highlight={pitcherCache.swstr_pct !== null ? (pitcherCache.swstr_pct > 0.125 ? "green" : pitcherCache.swstr_pct < 0.085 ? "red" : "neutral") : "neutral"}
+            />
+            <MetricCard
+              label="O-Swing% (Chase)"
+              value={pitcherCache.o_swing_pct !== null ? `${(pitcherCache.o_swing_pct * 100).toFixed(1)}%` : "—"}
+              sub="League avg: 30.0%"
+              highlight={pitcherCache.o_swing_pct !== null ? (pitcherCache.o_swing_pct > 0.33 ? "green" : pitcherCache.o_swing_pct < 0.27 ? "red" : "neutral") : "neutral"}
+            />
+            <MetricCard
+              label="Velocity"
+              value={pitcherCache.season_avg_velocity !== null ? `${pitcherCache.season_avg_velocity.toFixed(1)} mph` : "—"}
+              sub={
+                pitcherCache.last3_avg_velocity !== null && pitcherCache.season_avg_velocity !== null
+                  ? (() => {
+                      const trend = pitcherCache.last3_avg_velocity - pitcherCache.season_avg_velocity;
+                      return `Recent: ${pitcherCache.last3_avg_velocity.toFixed(1)} mph (${trend >= 0 ? "+" : ""}${trend.toFixed(1)})`;
+                    })()
+                  : "Recent: —"
+              }
+              highlight={
+                pitcherCache.last3_avg_velocity !== null && pitcherCache.season_avg_velocity !== null
+                  ? (pitcherCache.last3_avg_velocity - pitcherCache.season_avg_velocity) < -1.5 ? "red" : "neutral"
+                  : "neutral"
+              }
+            />
+            <MetricCard
+              label="K% vs LHH"
+              value={pitcherCache.k_pct_vs_lhh !== null ? `${(pitcherCache.k_pct_vs_lhh * 100).toFixed(1)}%` : "—"}
+              sub="vs left-handed hitters"
+            />
+            <MetricCard
+              label="K% vs RHH"
+              value={pitcherCache.k_pct_vs_rhh !== null ? `${(pitcherCache.k_pct_vs_rhh * 100).toFixed(1)}%` : "—"}
+              sub="vs right-handed hitters"
+            />
+            {pitcherCache.k_pct_vs_lhh !== null && pitcherCache.k_pct_vs_rhh !== null && (
+              <MetricCard
+                label="Platoon Split"
+                value={`${Math.abs((pitcherCache.k_pct_vs_rhh - pitcherCache.k_pct_vs_lhh) * 100).toFixed(1)}%`}
+                sub={pitcherCache.k_pct_vs_rhh > pitcherCache.k_pct_vs_lhh ? "Better vs RHH" : "Better vs LHH"}
+                highlight={Math.abs(pitcherCache.k_pct_vs_rhh - pitcherCache.k_pct_vs_lhh) > 0.05 ? "yellow" : "neutral"}
+              />
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Line movement chart */}
       {lineSnapshots.length > 0 && (
         <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
@@ -392,5 +455,34 @@ function StatusBadge({
     >
       {label}
     </span>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  sub,
+  highlight = "neutral"
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  highlight?: "green" | "red" | "yellow" | "neutral";
+}) {
+  const valueClass =
+    highlight === "green"
+      ? "text-green-400"
+      : highlight === "red"
+      ? "text-red-400"
+      : highlight === "yellow"
+      ? "text-yellow-400"
+      : "text-white";
+
+  return (
+    <div className="rounded-lg border border-slate-600 bg-slate-700/50 p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`mt-1 text-xl font-bold ${valueClass}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
+    </div>
   );
 }

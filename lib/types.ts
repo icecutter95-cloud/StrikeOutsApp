@@ -102,6 +102,11 @@ export interface PitcherStats {
   season_k9: number | null;
   csw_pct: number | null;
   swstr_pct: number | null;
+  o_swing_pct: number | null;
+  season_avg_velocity: number | null;
+  last3_avg_velocity: number | null;
+  k_pct_vs_lhh: number | null;  // K% vs left-handed hitters
+  k_pct_vs_rhh: number | null;  // K% vs right-handed hitters
   xfip: number | null;
   last3_k_rate: number | null;
   last3_ip: number | null;

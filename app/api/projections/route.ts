@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getTodaysGames, getLineup, getPitcherRecentStarts } from "@/lib/data/mlb-stats";
-import { getPitcherSeasonStats, getBatterStrikeoutStats } from "@/lib/data/baseball-savant";
+import { getPitcherSeasonStats, getBatterStrikeoutStats, getPitcherRecentVelocity, getPitcherPlatoonSplits } from "@/lib/data/baseball-savant";
 import { getMLBPitcherKProps, matchPropToPitcher } from "@/lib/data/odds-api";
 import { getWeatherModifier } from "@/lib/data/weather";
 import { generateProjection } from "@/lib/projection";
@@ -69,9 +69,11 @@ export async function POST(req: NextRequest) {
           pitcherStats = cachedStats as PitcherStats;
         } else {
           // Fetch fresh data
-          const [seasonStats, recentStarts] = await Promise.all([
+          const [seasonStats, recentStarts, recentVelocity, platoonSplits] = await Promise.all([
             getPitcherSeasonStats(pitcherId),
-            getPitcherRecentStarts(pitcherId)
+            getPitcherRecentStarts(pitcherId),
+            getPitcherRecentVelocity(pitcherId),
+            getPitcherPlatoonSplits(pitcherId)
           ]);
 
           // Compute last3_k_rate
@@ -106,6 +108,11 @@ export async function POST(req: NextRequest) {
             season_k9: seasonStats.season_k9 ?? null,
             csw_pct: seasonStats.csw_pct ?? null,
             swstr_pct: seasonStats.swstr_pct ?? null,
+            o_swing_pct: seasonStats.o_swing_pct ?? null,
+            season_avg_velocity: seasonStats.season_avg_velocity ?? null,
+            last3_avg_velocity: recentVelocity,
+            k_pct_vs_lhh: platoonSplits.k_pct_vs_lhh,
+            k_pct_vs_rhh: platoonSplits.k_pct_vs_rhh,
             xfip: null,
             last3_k_rate: last3KRate,
             last3_ip: last3Ip,

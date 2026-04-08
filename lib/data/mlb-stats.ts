@@ -219,11 +219,29 @@ export async function getLineup(
       return [];
     }
 
-    // Array order = batting order; batSide not provided in this endpoint
+    // Array order = batting order; fetch batter hands via people endpoint
+    const batterIds = players.map((p) => p.id);
+    let handsMap: Record<string, "R" | "L" | "S"> = {};
+    try {
+      const handsUrl = `${MLB_API}/people?personIds=${batterIds.join(",")}`;
+      const handsRes = await fetch(handsUrl, { next: { revalidate: 86400 } });
+      if (handsRes.ok) {
+        const handsData = await handsRes.json() as { people?: Array<{ id: number; batSide?: { code: string } }> };
+        for (const person of handsData.people ?? []) {
+          const code = person.batSide?.code;
+          if (code === "R" || code === "L" || code === "S") {
+            handsMap[String(person.id)] = code as "R" | "L" | "S";
+          }
+        }
+      }
+    } catch {
+      // hand fetch failed — proceed with null hands
+    }
+
     return players.map((p, idx) => ({
       batter_id: String(p.id),
       batter_name: p.fullName,
-      hand: null, // batSide not included in schedule lineup hydration
+      hand: handsMap[String(p.id)] ?? null,
       batting_order: idx + 1,
       k_pct_vs_rhp: null,
       k_pct_vs_lhp: null
@@ -305,6 +323,36 @@ export async function getGameResult(
   }
 
   return null;
+}
+
+interface MLBPeopleResponse {
+  people?: Array<{ id: number; batSide?: { code: string } }>;
+}
+
+/**
+ * Batch-fetch bat side (R/L/S) for a list of batter IDs.
+ * Returns a map of batter_id (string) → hand code.
+ */
+export async function getBatterHands(
+  batterIds: number[]
+): Promise<Record<string, "R" | "L" | "S">> {
+  if (batterIds.length === 0) return {};
+  try {
+    const url = `${MLB_API}/people?personIds=${batterIds.join(",")}`;
+    const res = await fetch(url, { next: { revalidate: 86400 } }); // cache 24h — hand doesn't change
+    if (!res.ok) return {};
+    const data = await res.json() as MLBPeopleResponse;
+    const map: Record<string, "R" | "L" | "S"> = {};
+    for (const person of data.people ?? []) {
+      const code = person.batSide?.code;
+      if (code === "R" || code === "L" || code === "S") {
+        map[String(person.id)] = code;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 /**

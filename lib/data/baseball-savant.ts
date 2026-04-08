@@ -98,6 +98,7 @@ export async function getPitcherSeasonStats(
     `?hfGT=R%7C&hfSea=2026%7C&player_type=pitcher` +
     `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
     `&chk_stats_k_percent=on&chk_stats_csw_percent=on&chk_stats_swstr_percent=on` +
+    `&chk_stats_o_swing_percent=on&chk_stats_avg_speed=on` +
     `&player_id=${pitcherId}&type=summary`;
 
   try {
@@ -109,6 +110,8 @@ export async function getPitcherSeasonStats(
     const season_k_pct = parseFloatSafe(row["k_percent"]) ?? parseFloatSafe(row["k%"]);
     const csw_pct = parseFloatSafe(row["csw_percent"]) ?? parseFloatSafe(row["csw%"]);
     const swstr_pct = parseFloatSafe(row["swstr_percent"]) ?? parseFloatSafe(row["swstr%"]);
+    const o_swing_pct = parseFloatSafe(row["o_swing_percent"]) ?? parseFloatSafe(row["o_swing%"]);
+    const avg_speed = parseFloatSafe(row["avg_speed"]) ?? parseFloatSafe(row["velocity"]) ?? parseFloatSafe(row["release_speed"]);
 
     // K/9 can be derived from k% and estimated PA/IP
     // If season_k_pct is a percentage like 28.5, divide by 100
@@ -130,12 +133,101 @@ export async function getPitcherSeasonStats(
       swstr_pct:
         swstr_pct !== null && swstr_pct > 1
           ? swstr_pct / 100
-          : swstr_pct ?? undefined
+          : swstr_pct ?? undefined,
+      o_swing_pct: o_swing_pct !== null && o_swing_pct > 1 ? o_swing_pct / 100 : o_swing_pct ?? undefined,
+      season_avg_velocity: avg_speed ?? undefined,
     } as Partial<PitcherStats>;
   } catch (err) {
     console.error("[baseball-savant] getPitcherSeasonStats error:", err);
     return {};
   }
+}
+
+// ============================================================
+// Pitcher recent velocity (Baseball Savant)
+// ============================================================
+
+/**
+ * Fetch average velocity for each of the pitcher's last 3 starts
+ * using Baseball Savant's per-game grouped Statcast data.
+ * Returns the average of those starts' velocities, or null if unavailable.
+ */
+export async function getPitcherRecentVelocity(
+  pitcherId: number
+): Promise<number | null> {
+  const url =
+    `https://baseballsavant.mlb.com/statcast_search/csv` +
+    `?hfGT=R%7C&hfSea=2026%7C&player_type=pitcher` +
+    `&group_by=name-date&min_pitches=20&sort_col=game_date&sort_order=desc` +
+    `&chk_stats_avg_speed=on` +
+    `&player_id=${pitcherId}&type=summary`;
+
+  try {
+    const rows = await fetchCSV(url);
+    if (rows.length === 0) return null;
+
+    // Take most recent 3 starts (rows are sorted desc by date)
+    const last3 = rows.slice(0, 3);
+    const velocities = last3
+      .map((r) => parseFloatSafe(r["avg_speed"]) ?? parseFloatSafe(r["velocity"]) ?? parseFloatSafe(r["release_speed"]))
+      .filter((v): v is number => v !== null && v > 60);
+
+    if (velocities.length === 0) return null;
+    return velocities.reduce((a, b) => a + b, 0) / velocities.length;
+  } catch (err) {
+    console.error("[baseball-savant] getPitcherRecentVelocity error:", err);
+    return null;
+  }
+}
+
+// ============================================================
+// Pitcher platoon splits (MLB Stats API)
+// ============================================================
+
+/**
+ * Fetch pitcher K% vs LHH and vs RHH using MLB Stats API statSplits.
+ * Uses current season first, falls back to prior season, then career.
+ * Minimum 50 batters faced per split.
+ */
+export async function getPitcherPlatoonSplits(
+  pitcherId: number
+): Promise<{ k_pct_vs_lhh: number | null; k_pct_vs_rhh: number | null }> {
+  const currentYear = new Date().getFullYear();
+  const empty = { k_pct_vs_lhh: null, k_pct_vs_rhh: null };
+
+  const tryFetch = async (url: string) => {
+    try {
+      const res = await fetch(url, { next: { revalidate: 3600 } });
+      if (!res.ok) return null;
+
+      const data = await res.json() as { stats?: Array<{ splits?: Array<{ split?: { code?: string }; stat?: { strikeOuts?: number; battersFaced?: number } }> }> };
+      const splits = data.stats?.[0]?.splits ?? [];
+      if (splits.length === 0) return null;
+
+      const vsL = splits.find((s) => s.split?.code === "vl");
+      const vsR = splits.find((s) => s.split?.code === "vr");
+
+      const kVsL = safePitcherKPct(vsL?.stat?.strikeOuts, vsL?.stat?.battersFaced);
+      const kVsR = safePitcherKPct(vsR?.stat?.strikeOuts, vsR?.stat?.battersFaced);
+
+      if (kVsL === null && kVsR === null) return null;
+      return { k_pct_vs_lhh: kVsL, k_pct_vs_rhh: kVsR };
+    } catch {
+      return null;
+    }
+  };
+
+  return (
+    (await tryFetch(`https://statsapi.mlb.com/api/v1/people/${pitcherId}/stats?stats=statSplits&group=pitching&season=${currentYear}&sitCodes=vl,vr`)) ??
+    (await tryFetch(`https://statsapi.mlb.com/api/v1/people/${pitcherId}/stats?stats=statSplits&group=pitching&season=${currentYear - 1}&sitCodes=vl,vr`)) ??
+    (await tryFetch(`https://statsapi.mlb.com/api/v1/people/${pitcherId}/stats?stats=careerStatSplits&group=pitching&sitCodes=vl,vr`)) ??
+    empty
+  );
+}
+
+function safePitcherKPct(ks?: number, bf?: number): number | null {
+  if (ks == null || bf == null || bf < 50) return null;
+  return ks / bf;
 }
 
 // ============================================================

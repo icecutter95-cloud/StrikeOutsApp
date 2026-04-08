@@ -16,6 +16,11 @@ import {
 // League average K% (2024 MLB: ~22.5%)
 const LEAGUE_AVG_K_PCT = 0.225;
 
+// League average SwStr% (2024 MLB: ~10.5%)
+const LEAGUE_AVG_SWSTR = 0.105;
+// League average O-Swing% (2024 MLB: ~30%)
+const LEAGUE_AVG_OSWING = 0.30;
+
 // Default pitcher workload constants
 const PITCHES_PER_INNING = 15.5;
 const MAX_IP = 7.0;
@@ -65,6 +70,61 @@ function getSeasonalWeights(
 }
 
 // ============================================================
+// Stuff quality & velocity helpers
+// ============================================================
+
+function computeSwStrMultiplier(stats: PitcherStats): number {
+  if (stats.swstr_pct === null) return 1.0;
+  // Dampened power function: elite SwStr% (15%) → ~1.09x, weak (7%) → ~0.92x
+  const ratio = stats.swstr_pct / LEAGUE_AVG_SWSTR;
+  return Math.max(0.85, Math.min(1.15, Math.pow(ratio, 0.4)));
+}
+
+function computeOSwingMultiplier(stats: PitcherStats): number {
+  if (stats.o_swing_pct === null) return 1.0;
+  // High chase rate helps Ks; dampened effect
+  const ratio = stats.o_swing_pct / LEAGUE_AVG_OSWING;
+  return Math.max(0.90, Math.min(1.10, Math.pow(ratio, 0.3)));
+}
+
+function computeVelocityMultiplier(stats: PitcherStats): number {
+  if (stats.last3_avg_velocity === null || stats.season_avg_velocity === null) return 1.0;
+  const trend = stats.last3_avg_velocity - stats.season_avg_velocity;
+  // Only apply a penalty for significant velocity drops (> 1 mph below season avg)
+  // No bonus for being up — velo spikes don't reliably predict more Ks
+  if (trend >= -1.0) return 1.0;
+  // Scale: -2 mph → ~0.97x, -3 mph → ~0.94x, max penalty 10% at -4+ mph
+  const penalty = Math.min(0.10, (-trend - 1.0) * 0.033);
+  return 1.0 - penalty;
+}
+
+function computePlatoonAdjustedSeasonK9(
+  stats: PitcherStats,
+  lineup: LineupPlayer[]
+): number {
+  const baseSeasonK9 = computeSeasonK9(stats);
+
+  // Need both platoon splits to do lineup-specific adjustment
+  if (stats.k_pct_vs_lhh === null || stats.k_pct_vs_rhh === null) return baseSeasonK9;
+
+  // Compute lineup handedness composition from known batter hands
+  const battersWithHand = lineup.filter((b) => b.hand !== null);
+  if (battersWithHand.length < 4) return baseSeasonK9; // insufficient data
+
+  const switchCount = battersWithHand.filter((b) => b.hand === "S").length;
+  const rhhCount = battersWithHand.filter((b) => b.hand === "R").length + switchCount * 0.5;
+  const lhhCount = battersWithHand.filter((b) => b.hand === "L").length + switchCount * 0.5;
+  const total = rhhCount + lhhCount;
+  if (total === 0) return baseSeasonK9;
+
+  const pctRhh = rhhCount / total;
+  const pctLhh = lhhCount / total;
+
+  const platoonKPct = pctRhh * stats.k_pct_vs_rhh + pctLhh * stats.k_pct_vs_lhh;
+  return platoonKPct * 27; // convert K% to K/9 (approx 27 batters per 9 IP)
+}
+
+// ============================================================
 // Main projection function
 // ============================================================
 
@@ -100,7 +160,7 @@ export async function generateProjection(
   // ----------------------------------------------------------
 
   const last3K9 = computeLast3K9(pitcherStats);
-  const seasonK9 = computeSeasonK9(pitcherStats);
+  const seasonK9 = computePlatoonAdjustedSeasonK9(pitcherStats, lineup);
   const cswK9 = computeCSWK9(pitcherStats);
   const xfipK9 = computeXFIPK9(pitcherStats);
 
@@ -146,9 +206,18 @@ export async function generateProjection(
     finalWeatherModifier;
 
   // ----------------------------------------------------------
+  // Step 6b: Stuff quality & velocity multipliers
+  // ----------------------------------------------------------
+  const swStrMultiplier = computeSwStrMultiplier(pitcherStats);
+  const oSwingMultiplier = computeOSwingMultiplier(pitcherStats);
+  const velocityMultiplier = computeVelocityMultiplier(pitcherStats);
+
+  const adjustedProjectedKs = projectedKs * swStrMultiplier * oSwingMultiplier * velocityMultiplier;
+
+  // ----------------------------------------------------------
   // Step 7: Confidence interval (±CI or Poisson 80% CI)
   // ----------------------------------------------------------
-  const [confidenceLow, confidenceHigh] = computeConfidenceInterval(projectedKs);
+  const [confidenceLow, confidenceHigh] = computeConfidenceInterval(adjustedProjectedKs);
 
   // ----------------------------------------------------------
   // Step 8: EV / edge calculation (only if prop line available)
@@ -162,7 +231,7 @@ export async function generateProjection(
   let recommendedUnits = 0;
 
   if (propLine !== null) {
-    modelProbOver = poissonProbOver(propLine, projectedKs);
+    modelProbOver = poissonProbOver(propLine, adjustedProjectedKs);
     modelProbUnder = 1 - modelProbOver;
 
     if (propOddsOver !== null && propOddsUnder !== null) {
@@ -200,7 +269,7 @@ export async function generateProjection(
   }
 
   return {
-    projected_ks: Math.max(0, projectedKs),
+    projected_ks: Math.max(0, adjustedProjectedKs),
     confidence_low: Math.max(0, confidenceLow),
     confidence_high: confidenceHigh,
     model_prob_over: modelProbOver,

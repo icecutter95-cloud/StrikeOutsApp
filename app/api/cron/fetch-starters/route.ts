@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getTodaysGames, getPitcherRecentStarts } from "@/lib/data/mlb-stats";
-import { getPitcherSeasonStats } from "@/lib/data/baseball-savant";
+import { getPitcherSeasonStats, getPitcherRecentVelocity, getPitcherPlatoonSplits } from "@/lib/data/baseball-savant";
 import { generateProjection } from "@/lib/projection";
 import { getWeatherModifier } from "@/lib/data/weather";
 import { toDateString } from "@/lib/utils";
@@ -46,9 +46,11 @@ export async function GET(req: NextRequest) {
         const pitcherId = parseInt(game.pitcher_id, 10);
 
         // Fetch and refresh pitcher stats
-        const [seasonStats, recentStarts] = await Promise.all([
+        const [seasonStats, recentStarts, recentVelocity, platoonSplits] = await Promise.all([
           getPitcherSeasonStats(pitcherId),
-          getPitcherRecentStarts(pitcherId)
+          getPitcherRecentStarts(pitcherId),
+          getPitcherRecentVelocity(pitcherId),
+          getPitcherPlatoonSplits(pitcherId)
         ]);
 
         let last3KRate: number | null = null;
@@ -82,6 +84,11 @@ export async function GET(req: NextRequest) {
           season_k9: seasonStats.season_k9 ?? null,
           csw_pct: seasonStats.csw_pct ?? null,
           swstr_pct: seasonStats.swstr_pct ?? null,
+          o_swing_pct: seasonStats.o_swing_pct ?? null,
+          season_avg_velocity: seasonStats.season_avg_velocity ?? null,
+          last3_avg_velocity: recentVelocity,
+          k_pct_vs_lhh: platoonSplits.k_pct_vs_lhh,
+          k_pct_vs_rhh: platoonSplits.k_pct_vs_rhh,
           xfip: null,
           last3_k_rate: last3KRate,
           last3_ip: last3Ip,
