@@ -153,7 +153,7 @@ async function resolveGamePk(prediction: Prediction): Promise<number | null> {
     const pitcherIdNum = parseInt(prediction.pitcher_id, 10);
     const pitcherKey = `ID${pitcherIdNum}`;
 
-    // Step 2: Check each game's boxscore for this pitcher in the player list
+    // Step 2: Check each game's boxscore — only match if pitcher has actual pitching stats
     for (const gamePk of gamePks) {
       try {
         const boxUrl = `https://statsapi.mlb.com/api/v1/game/${gamePk}/boxscore`;
@@ -162,8 +162,8 @@ async function resolveGamePk(prediction: Prediction): Promise<number | null> {
 
         const box = await boxRes.json() as {
           teams: {
-            home: { players: Record<string, unknown> };
-            away: { players: Record<string, unknown> };
+            home: { players: Record<string, { stats?: { pitching?: { numberOfPitches?: number; inningsPitched?: string } } }> };
+            away: { players: Record<string, { stats?: { pitching?: { numberOfPitches?: number; inningsPitched?: string } } }> };
           };
         };
 
@@ -172,7 +172,13 @@ async function resolveGamePk(prediction: Prediction): Promise<number | null> {
           ...box.teams.away.players
         };
 
-        if (pitcherKey in allPlayers) {
+        const entry = allPlayers[pitcherKey];
+        if (!entry?.stats?.pitching) continue;
+
+        // Only count this as a match if the pitcher actually took the mound
+        const pitches = entry.stats.pitching.numberOfPitches ?? 0;
+        const ip = entry.stats.pitching.inningsPitched ?? "0";
+        if (pitches > 0 || ip !== "0.0" && ip !== "0") {
           return gamePk;
         }
       } catch {
