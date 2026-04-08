@@ -28,6 +28,42 @@ const CSW_CALIBRATION = 25;
 // Confidence interval half-width (Poisson 80% CI approximation)
 const CI_HALF_WIDTH = 1.5;
 
+/**
+ * Early season weight adjustment.
+ * Reduces reliance on last3 K rate when sample is thin (first 6 weeks of season).
+ * Redistributes the reduced weight proportionally to season, csw, xfip.
+ */
+function getSeasonalWeights(
+  config: ModelConfig,
+  gameTime: Date
+): { last3: number; season: number; csw: number; xfip: number } {
+  const month = gameTime.getMonth() + 1;
+  const day = gameTime.getDate();
+
+  // How much to scale down the last3 weight (1.0 = no change)
+  let last3Mult = 1.0;
+  if (month === 3) {
+    last3Mult = 0.30; // Opening week — almost no sample
+  } else if (month === 4 && day <= 14) {
+    last3Mult = 0.50; // Weeks 2–3
+  } else if (month === 4 && day <= 28) {
+    last3Mult = 0.70; // Weeks 4–5
+  } else if (month === 5 && day <= 12) {
+    last3Mult = 0.85; // Weeks 6–7
+  }
+
+  const effectiveLast3 = config.weight_last3 * last3Mult;
+  const freed = config.weight_last3 * (1 - last3Mult);
+  const otherTotal = config.weight_season + config.weight_csw + config.weight_xfip;
+
+  return {
+    last3: effectiveLast3,
+    season: config.weight_season + freed * (config.weight_season / otherTotal),
+    csw: config.weight_csw + freed * (config.weight_csw / otherTotal),
+    xfip: config.weight_xfip + freed * (config.weight_xfip / otherTotal)
+  };
+}
+
 // ============================================================
 // Main projection function
 // ============================================================
@@ -69,11 +105,12 @@ export async function generateProjection(
   const xfipK9 = computeXFIPK9(pitcherStats);
 
   // Weighted blend
+  const seasonalWeights = getSeasonalWeights(config, gameTime);
   const blendedK9 =
-    last3K9 * config.weight_last3 +
-    seasonK9 * config.weight_season +
-    cswK9 * config.weight_csw +
-    xfipK9 * config.weight_xfip;
+    last3K9 * seasonalWeights.last3 +
+    seasonK9 * seasonalWeights.season +
+    cswK9 * seasonalWeights.csw +
+    xfipK9 * seasonalWeights.xfip;
 
   // ----------------------------------------------------------
   // Step 2: Projected IP

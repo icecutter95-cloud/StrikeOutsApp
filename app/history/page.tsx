@@ -73,7 +73,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   // Compute overall stats for the history
   const { data: allFinal } = await supabase
     .from("predictions")
-    .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units")
+    .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks")
     .eq("game_status", "final");
 
   const allPredictions = (allFinal ?? []) as Partial<Prediction>[];
@@ -122,6 +122,13 @@ export default async function HistoryPage({ searchParams }: PageProps) {
       ? (withResult.filter((p) => p.model_correct).length / withResult.length) * 100
       : null;
 
+  const withKs = allPredictions.filter(
+    (p) => p.projected_ks !== null && p.actual_ks !== null && p.recommendation !== "NO_BET"
+  );
+  const mae = withKs.length > 0
+    ? withKs.reduce((sum, p) => sum + Math.abs((p.projected_ks ?? 0) - (p.actual_ks ?? 0)), 0) / withKs.length
+    : null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -141,6 +148,13 @@ export default async function HistoryPage({ searchParams }: PageProps) {
             </p>
             <p className="text-xs text-slate-500">{withResult.length} decided bets</p>
           </div>
+          {mae !== null && (
+            <div className="border-l border-slate-700 pl-6">
+              <p className="text-xs uppercase tracking-wide text-slate-400">Avg Projection Error</p>
+              <p className="text-2xl font-bold text-white">{mae.toFixed(2)} Ks</p>
+              <p className="text-xs text-slate-500">{withKs.length} predictions</p>
+            </div>
+          )}
         </div>
       )}
 

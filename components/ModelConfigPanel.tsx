@@ -35,6 +35,16 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
   const [config, setConfig] = useState<ModelConfig>(initialConfig);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizerResult, setOptimizerResult] = useState<{
+    sample_size: number;
+    current_mae: number;
+    optimized_mae: number;
+    improvement: number;
+    current_weights: { last3: number; season: number; csw: number; xfip: number };
+    suggested_weights: { last3: number; season: number; csw: number; xfip: number };
+  } | null>(null);
+  const [applyingOptimized, setApplyingOptimized] = useState(false);
 
   const weightSum =
     config.weight_last3 +
@@ -85,6 +95,54 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
   const handleReset = () => {
     setConfig((prev) => ({ ...prev, ...DEFAULT_CONFIG }));
     setMessage({ type: "success", text: "Reset to defaults (not yet saved)" });
+  };
+
+  const handleOptimize = async () => {
+    setOptimizing(true);
+    setOptimizerResult(null);
+    try {
+      const res = await fetch("/api/optimize-weights");
+      const data = await res.json();
+      if (res.ok) {
+        setOptimizerResult(data);
+      } else {
+        setMessage({ type: "error", text: data.error ?? "Optimization failed" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Network error during optimization" });
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const handleApplyOptimized = async () => {
+    if (!optimizerResult) return;
+    setApplyingOptimized(true);
+    try {
+      const res = await fetch("/api/optimize-weights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weights: optimizerResult.suggested_weights })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setConfig((prev) => ({
+          ...prev,
+          weight_last3: optimizerResult.suggested_weights.last3,
+          weight_season: optimizerResult.suggested_weights.season,
+          weight_csw: optimizerResult.suggested_weights.csw,
+          weight_xfip: optimizerResult.suggested_weights.xfip
+        }));
+        setOptimizerResult(null);
+        setMessage({ type: "success", text: "Optimized weights applied and saved" });
+      } else {
+        setMessage({ type: "error", text: data.error ?? "Failed to apply" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Network error" });
+    } finally {
+      setApplyingOptimized(false);
+    }
   };
 
   return (
@@ -254,6 +312,92 @@ export default function ModelConfigPanel({ initialConfig }: ModelConfigPanelProp
             <span className="text-slate-400 text-sm">%</span>
           </div>
         </label>
+      </div>
+
+      {/* Weight Optimizer */}
+      <div className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Weight Optimizer</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Grid-searches ~1,000 weight combinations on your historical predictions to find the set that minimizes average projection error.
+            </p>
+          </div>
+          <button
+            onClick={handleOptimize}
+            disabled={optimizing}
+            className="ml-4 shrink-0 rounded-lg border border-brand px-4 py-2 text-sm font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
+          >
+            {optimizing ? "Analyzing..." : "⚙ Optimize Weights"}
+          </button>
+        </div>
+
+        {optimizerResult && (
+          <div className="mt-4 rounded-lg border border-slate-600 bg-slate-700/50 p-4 space-y-4">
+            {/* MAE comparison */}
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <p className="text-xs text-slate-400">Sample Size</p>
+                <p className="text-xl font-bold text-white">{optimizerResult.sample_size}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Current MAE</p>
+                <p className="text-xl font-bold text-slate-200">{optimizerResult.current_mae} Ks</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-400">Optimized MAE</p>
+                <p className="text-xl font-bold text-green-400">{optimizerResult.optimized_mae} Ks</p>
+                <p className="text-xs text-green-500">−{optimizerResult.improvement} Ks avg error</p>
+              </div>
+            </div>
+
+            {/* Weight comparison table */}
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-400">
+                  <th className="text-left py-1">Component</th>
+                  <th className="text-right py-1">Current</th>
+                  <th className="text-right py-1">Suggested</th>
+                  <th className="text-right py-1">Change</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-600/50">
+                {(["last3", "season", "csw", "xfip"] as const).map((key) => {
+                  const labels = { last3: "Last 3 Starts", season: "Season K%", csw: "CSW%", xfip: "xFIP" };
+                  const curr = optimizerResult.current_weights[key];
+                  const sugg = optimizerResult.suggested_weights[key];
+                  const diff = sugg - curr;
+                  return (
+                    <tr key={key}>
+                      <td className="py-1.5 text-slate-300">{labels[key]}</td>
+                      <td className="py-1.5 text-right text-slate-400">{(curr * 100).toFixed(0)}%</td>
+                      <td className="py-1.5 text-right font-medium text-white">{(sugg * 100).toFixed(0)}%</td>
+                      <td className={`py-1.5 text-right text-xs ${diff > 0.005 ? "text-green-400" : diff < -0.005 ? "text-red-400" : "text-slate-500"}`}>
+                        {diff > 0.005 ? "+" : ""}{(diff * 100).toFixed(0)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={handleApplyOptimized}
+                disabled={applyingOptimized}
+                className="rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+              >
+                {applyingOptimized ? "Applying..." : "Apply Suggested Weights"}
+              </button>
+              <button
+                onClick={() => setOptimizerResult(null)}
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-700"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Save / reset actions */}

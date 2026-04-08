@@ -93,6 +93,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
               Steam {prediction.steam_direction === "up" ? "↑" : "↓"}
             </span>
           )}
+          <DivergenceBadge prediction={prediction} />
           {prediction.game_status === "final" && (
             <FinalBadge prediction={prediction} />
           )}
@@ -174,6 +175,45 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
       }`}
     >
       {prediction.actual_ks} Ks {prediction.model_correct ? "✓" : "✗"}
+    </span>
+  );
+}
+
+function computeStuffDivergence(prediction: Prediction): {
+  type: "regression" | "upside" | null;
+  pct: number;
+} {
+  const { last3_k_rate, csw_pct } = prediction;
+  if (last3_k_rate === null || csw_pct === null) return { type: null, pct: 0 };
+
+  const last3K9 = last3_k_rate <= 1 ? last3_k_rate * 27 : last3_k_rate;
+  const cswNorm = csw_pct > 1 ? csw_pct / 100 : csw_pct;
+  const cswK9 = cswNorm * 25;
+
+  if (cswK9 === 0) return { type: null, pct: 0 };
+  const divergence = (last3K9 - cswK9) / cswK9;
+
+  if (divergence > 0.3) return { type: "regression", pct: divergence };
+  if (divergence < -0.3) return { type: "upside", pct: divergence };
+  return { type: null, pct: divergence };
+}
+
+function DivergenceBadge({ prediction }: { prediction: Prediction }) {
+  const { type, pct } = computeStuffDivergence(prediction);
+  if (!type) return null;
+
+  if (type === "regression") {
+    return (
+      <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs font-medium text-amber-400"
+        title={`Last 3 starts K/9 is ${Math.abs(pct * 100).toFixed(0)}% above CSW%-implied rate — regression risk`}>
+        Regression Risk ↓
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-cyan-900/40 px-2 py-0.5 text-xs font-medium text-cyan-400"
+      title={`Last 3 starts K/9 is ${Math.abs(pct * 100).toFixed(0)}% below CSW%-implied rate — stuff suggests upside`}>
+      Upside Risk ↑
     </span>
   );
 }
