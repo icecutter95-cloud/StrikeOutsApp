@@ -81,76 +81,72 @@ async function fetchCSV(url: string): Promise<Record<string, string>[]> {
 
 /**
  * Fetch pitcher season stats from Baseball Savant.
- * Uses the statcast search CSV endpoint filtered to a single pitcher.
  *
- * NOTE: The exact endpoint parameters may need adjustment for the current
- * season. The leaderboard endpoint below is more stable for single-pitcher
- * lookups but Baseball Savant does not have a guaranteed public JSON API —
- * this uses the CSV download which is subject to rate limiting.
+ * Uses the per-game grouped Statcast endpoint (group_by=name-date), which
+ * returns one row per start with aggregated per-game stats. We then average
+ * across all starts to get season-level figures.
+ *
+ * NOTE: The "type=summary" endpoint was found to return raw pitch-level data
+ * (one row per pitch) when filtered by player_id — the chk_stats_* parameters
+ * only work on the leaderboard view, not player-specific queries. The game log
+ * endpoint is the reliable alternative.
+ *
+ * Available columns from this endpoint:
+ *   velocity, effective_speed   → avg pitch velocity per start
+ *   swing_miss_percent          → SwStr% per start
+ *   k_percent                   → K% per start
+ *   whiffs, swings, takes       → raw counts
+ *
+ * NOT available (O-Swing%, CSW%) — these are null and multipliers default to 1.0.
  */
 export async function getPitcherSeasonStats(
   pitcherId: number
 ): Promise<Partial<PitcherStats>> {
-  // Statcast leaderboard CSV for a specific pitcher
-  // TODO: Verify endpoint URL each season; Baseball Savant may update parameters
   const url =
     `https://baseballsavant.mlb.com/statcast_search/csv` +
     `?hfGT=R%7C&hfSea=2026%7C&player_type=pitcher` +
-    `&group_by=name&min_pitches=0&sort_col=pitches&sort_order=desc` +
-    `&chk_stats_k_percent=on&chk_stats_csw_percent=on&chk_stats_swstr_percent=on` +
-    `&chk_stats_o_swing_percent=on&chk_stats_avg_speed=on` +
-    `&player_id=${pitcherId}&type=summary`;
+    `&group_by=name-date&min_pitches=20&sort_col=game_date&sort_order=desc` +
+    `&player_id=${pitcherId}`;
 
   try {
     const rows = await fetchCSV(url);
     if (rows.length === 0) return {};
 
-    const row = rows[0];
+    const kPcts: number[] = [];
+    const velocities: number[] = [];
+    const swstrPcts: number[] = [];
 
-    const season_k_pct = parseFloatSafe(row["k_percent"]) ?? parseFloatSafe(row["k%"]);
-    const csw_pct = parseFloatSafe(row["csw_percent"]) ?? parseFloatSafe(row["csw%"]);
-    // Baseball Savant uses "whiff_percent" or "swstr_percent" depending on endpoint
+    for (const row of rows) {
+      const kPct = parseFloatSafe(row["k_percent"]);
+      const vel =
+        parseFloatSafe(row["velocity"]) ??
+        parseFloatSafe(row["effective_speed"]);
+      const swstr = parseFloatSafe(row["swing_miss_percent"]);
+
+      if (kPct !== null && kPct >= 0) kPcts.push(kPct);
+      if (vel !== null && vel > 60) velocities.push(vel);
+      if (swstr !== null && swstr >= 0) swstrPcts.push(swstr);
+    }
+
+    const avg = (arr: number[]) =>
+      arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+    const rawKPct = avg(kPcts);
+    const season_k_pct =
+      rawKPct !== null ? (rawKPct > 1 ? rawKPct / 100 : rawKPct) : null;
+
+    const season_avg_velocity = avg(velocities);
+
+    const rawSwstr = avg(swstrPcts);
     const swstr_pct =
-      parseFloatSafe(row["swstr_percent"]) ??
-      parseFloatSafe(row["swstr%"]) ??
-      parseFloatSafe(row["whiff_percent"]) ??
-      parseFloatSafe(row["whiff%"]);
-    // Baseball Savant uses "oz_swing_percent" (outside zone swing %) — also try o_swing variants
-    const o_swing_pct =
-      parseFloatSafe(row["oz_swing_percent"]) ??
-      parseFloatSafe(row["oz_swing%"]) ??
-      parseFloatSafe(row["o_swing_percent"]) ??
-      parseFloatSafe(row["o_swing%"]) ??
-      parseFloatSafe(row["chase_rate"]);
-    const avg_speed =
-      parseFloatSafe(row["avg_speed"]) ??
-      parseFloatSafe(row["velocity"]) ??
-      parseFloatSafe(row["release_speed"]) ??
-      parseFloatSafe(row["avg_release_speed"]);
-
-    // K/9 can be derived from k% and estimated PA/IP
-    // If season_k_pct is a percentage like 28.5, divide by 100
-    const k_pct_normalized =
-      season_k_pct !== null && season_k_pct > 1
-        ? season_k_pct / 100
-        : season_k_pct;
-
-    const season_k9 =
-      k_pct_normalized !== null
-        ? k_pct_normalized * 27 // approx 27 batters per 9 IP
-        : null;
+      rawSwstr !== null ? (rawSwstr > 1 ? rawSwstr / 100 : rawSwstr) : null;
 
     return {
-      season_k_pct: k_pct_normalized ?? undefined,
-      season_k9: season_k9 ?? undefined,
-      csw_pct:
-        csw_pct !== null && csw_pct > 1 ? csw_pct / 100 : csw_pct ?? undefined,
-      swstr_pct:
-        swstr_pct !== null && swstr_pct > 1
-          ? swstr_pct / 100
-          : swstr_pct ?? undefined,
-      o_swing_pct: o_swing_pct !== null && o_swing_pct > 1 ? o_swing_pct / 100 : o_swing_pct ?? undefined,
-      season_avg_velocity: avg_speed ?? undefined,
+      season_k_pct: season_k_pct ?? undefined,
+      season_k9: season_k_pct !== null ? season_k_pct * 27 : undefined,
+      swstr_pct: swstr_pct ?? undefined,
+      season_avg_velocity: season_avg_velocity ?? undefined,
+      // CSW% and O-Swing% not available from this endpoint
     } as Partial<PitcherStats>;
   } catch (err) {
     console.error("[baseball-savant] getPitcherSeasonStats error:", err);
@@ -186,10 +182,7 @@ export async function getPitcherRecentVelocity(
     const last3 = rows.slice(0, 3);
     const velocities = last3
       .map((r) =>
-        parseFloatSafe(r["avg_speed"]) ??
         parseFloatSafe(r["velocity"]) ??
-        parseFloatSafe(r["release_speed"]) ??
-        parseFloatSafe(r["avg_release_speed"]) ??
         parseFloatSafe(r["effective_speed"])
       )
       .filter((v): v is number => v !== null && v > 60);
