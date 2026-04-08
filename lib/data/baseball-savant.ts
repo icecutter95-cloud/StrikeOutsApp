@@ -114,18 +114,29 @@ export async function getPitcherSeasonStats(
 
     const kPcts: number[] = [];
     const velocities: number[] = [];
-    const swstrPcts: number[] = [];
+    // Accumulate raw whiffs + pitches across starts so we can compute a
+    // weighted season SwStr% = total_whiffs / total_pitches.
+    // NOTE: swing_miss_percent in the game_log = whiffs/swings (not whiffs/pitches),
+    // so we must use the raw counts to get true SwStr% (whiffs/total_pitches).
+    let totalWhiffs = 0;
+    let totalPitches = 0;
 
     for (const row of rows) {
       const kPct = parseFloatSafe(row["k_percent"]);
       const vel =
         parseFloatSafe(row["velocity"]) ??
         parseFloatSafe(row["effective_speed"]);
-      const swstr = parseFloatSafe(row["swing_miss_percent"]);
+      const whiffs = parseFloatSafe(row["whiffs"]);
+      const pitches =
+        parseFloatSafe(row["total_pitches"]) ??
+        parseFloatSafe(row["pitches"]);
 
       if (kPct !== null && kPct >= 0) kPcts.push(kPct);
       if (vel !== null && vel > 60) velocities.push(vel);
-      if (swstr !== null && swstr >= 0) swstrPcts.push(swstr);
+      if (whiffs !== null && pitches !== null && pitches > 0) {
+        totalWhiffs += whiffs;
+        totalPitches += pitches;
+      }
     }
 
     const avg = (arr: number[]) =>
@@ -137,9 +148,9 @@ export async function getPitcherSeasonStats(
 
     const season_avg_velocity = avg(velocities);
 
-    const rawSwstr = avg(swstrPcts);
+    // True SwStr% = total whiffs / total pitches (weighted across all starts)
     const swstr_pct =
-      rawSwstr !== null ? (rawSwstr > 1 ? rawSwstr / 100 : rawSwstr) : null;
+      totalPitches > 0 ? totalWhiffs / totalPitches : null;
 
     return {
       season_k_pct: season_k_pct ?? undefined,
