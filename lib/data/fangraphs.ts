@@ -1,4 +1,128 @@
 // ============================================================
+// FanGraphs pitcher xFIP leaderboard
+// ============================================================
+
+/**
+ * Normalise a pitcher name for fuzzy matching:
+ *   "José Abreu" → "jose abreu", "Félix Hernández" → "felix hernandez"
+ */
+function normalizeName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z ]/g, "")
+    .trim();
+}
+
+interface FanGraphsRow {
+  PlayerName: string;
+  xFIP: number | string | null;
+  [key: string]: unknown;
+}
+
+interface FanGraphsResponse {
+  data?: FanGraphsRow[];
+}
+
+/**
+ * Fetch the current-season pitcher xFIP leaderboard from FanGraphs.
+ * Returns a Map of normalised pitcher name → xFIP value.
+ *
+ * Uses the major-league leaderboard API (type=1 = dashboard, includes xFIP).
+ * qual=0 returns all pitchers regardless of innings minimum.
+ * Cached for 1 hour via Next.js fetch cache.
+ */
+async function fetchFanGraphsXFIPMap(): Promise<Map<string, number>> {
+  const season = new Date().getFullYear();
+  const url =
+    `https://www.fangraphs.com/api/leaders/major-league/data` +
+    `?pos=all&stats=pit&lg=all&qual=0&pageitems=2000000000&pagenum=1` +
+    `&ind=0&season=${season}&team=0&startdt=&enddt=&month=0` +
+    `&hand=&type=1&postseason=&sortdir=desc&sortstat=xFIP`;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; StrikeOutsApp/1.0; +https://github.com/strikeoutsapp)",
+        Accept: "application/json"
+      },
+      next: { revalidate: 3600 }
+    });
+
+    if (!res.ok) {
+      console.warn(`[fangraphs] xFIP fetch failed (${res.status})`);
+      return new Map();
+    }
+
+    const json = await res.json() as FanGraphsResponse;
+    const rows = json?.data ?? [];
+
+    const map = new Map<string, number>();
+    for (const row of rows) {
+      if (!row.PlayerName) continue;
+      const xfip = typeof row.xFIP === "number"
+        ? row.xFIP
+        : typeof row.xFIP === "string"
+          ? parseFloat(row.xFIP)
+          : NaN;
+      if (!isNaN(xfip) && xfip > 0) {
+        map.set(normalizeName(row.PlayerName), xfip);
+      }
+    }
+
+    return map;
+  } catch (err) {
+    console.error("[fangraphs] fetchFanGraphsXFIPMap error:", err);
+    return new Map();
+  }
+}
+
+/**
+ * Look up a pitcher's xFIP by name from the FanGraphs leaderboard.
+ *
+ * Matching strategy (same as odds-api.ts matchPropToPitcher):
+ *   1. Exact normalised name match
+ *   2. Last name + first initial  (handles minor name differences)
+ *   3. Last name only             (only when last name length > 4)
+ *
+ * Returns null if no match found or xFIP data unavailable.
+ */
+export async function getPitcherXFIP(pitcherName: string): Promise<number | null> {
+  const map = await fetchFanGraphsXFIPMap();
+  if (map.size === 0) return null;
+
+  const norm = normalizeName(pitcherName);
+  const parts = norm.split(" ");
+  const lastName = parts[parts.length - 1] ?? "";
+  const firstInitial = parts[0]?.[0] ?? "";
+
+  // 1. Exact match
+  if (map.has(norm)) return map.get(norm)!;
+
+  // 2. Last name + first initial
+  if (lastName.length > 3) {
+    for (const [key, xfip] of map) {
+      const kParts = key.split(" ");
+      const kLast = kParts[kParts.length - 1] ?? "";
+      const kFirst = kParts[0]?.[0] ?? "";
+      if (kLast === lastName && kFirst === firstInitial) return xfip;
+    }
+  }
+
+  // 3. Last name only (unambiguous long last names)
+  if (lastName.length > 4) {
+    for (const [key, xfip] of map) {
+      const kLast = key.split(" ").pop() ?? "";
+      if (kLast === lastName) return xfip;
+    }
+  }
+
+  return null;
+}
+
+// ============================================================
 // Hardcoded FanGraphs 3-year park factors for strikeouts
 // Source: FanGraphs Park Factors (Strikeouts, 3-year rolling)
 // Values > 1.0 = pitcher-friendly for Ks (more Ks), < 1.0 = hitter-friendly

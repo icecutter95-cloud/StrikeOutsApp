@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getTodaysGames, getLineup, getPitcherRecentStarts } from "@/lib/data/mlb-stats";
 import { getPitcherSeasonStats, getBatterStrikeoutStats, getPitcherRecentVelocity, getPitcherPlatoonSplits } from "@/lib/data/baseball-savant";
+import { getPitcherXFIP } from "@/lib/data/fangraphs";
 import { getMLBPitcherKProps, matchPropToPitcher } from "@/lib/data/odds-api";
 import { getWeatherModifier } from "@/lib/data/weather";
 import { generateProjection } from "@/lib/projection";
@@ -69,11 +70,12 @@ export async function POST(req: NextRequest) {
           pitcherStats = cachedStats as PitcherStats;
         } else {
           // Fetch fresh data
-          const [seasonStats, recentStarts, recentVelocity, platoonSplits] = await Promise.all([
+          const [seasonStats, recentStarts, recentVelocity, platoonSplits, xfip] = await Promise.all([
             getPitcherSeasonStats(pitcherId),
             getPitcherRecentStarts(pitcherId),
             getPitcherRecentVelocity(pitcherId),
-            getPitcherPlatoonSplits(pitcherId)
+            getPitcherPlatoonSplits(pitcherId),
+            getPitcherXFIP(game.pitcher_name)
           ]);
 
           // Compute last3_k_rate
@@ -113,7 +115,7 @@ export async function POST(req: NextRequest) {
             last3_avg_velocity: recentVelocity,
             k_pct_vs_lhh: platoonSplits.k_pct_vs_lhh,
             k_pct_vs_rhh: platoonSplits.k_pct_vs_rhh,
-            xfip: null,
+            xfip: xfip,
             last3_k_rate: last3KRate,
             last3_ip: last3Ip,
             avg_pitches_per_start: avgPitches,
