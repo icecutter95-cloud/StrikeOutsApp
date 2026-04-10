@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPitcherXFIP } from "@/lib/data/fangraphs";
+import { getPitcherFanGraphsStats } from "@/lib/data/fangraphs";
 
 /**
  * Debug endpoint — verifies FanGraphs xFIP lookup is working.
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
   interface FanGraphsRow {
     PlayerName?: string;
     xFIP?: number | string | null;
+    "O-Swing%"?: number | string | null;
     [key: string]: unknown;
   }
 
@@ -54,7 +55,8 @@ export async function GET(req: NextRequest) {
         available_keys: rows[0] ? Object.keys(rows[0]) : [],
         first_5: rows.slice(0, 5).map((r) => ({
           PlayerName: r.PlayerName,
-          xFIP: r.xFIP
+          xFIP: r.xFIP,
+          "O-Swing%": r["O-Swing%"]
         }))
       };
     }
@@ -63,11 +65,12 @@ export async function GET(req: NextRequest) {
   }
 
   // Now do the actual lookup via the exported function
-  const xfip = await getPitcherXFIP(pitcherName);
+  const fgStats = await getPitcherFanGraphsStats(pitcherName);
 
   return NextResponse.json({
     pitcher_name: pitcherName,
-    xfip_result: xfip,
+    xfip_result: fgStats.xfip,
+    o_swing_pct_result: fgStats.o_swing_pct,
     fangraphs_status: fetchStatus,
     raw_sample: rawSample
   });

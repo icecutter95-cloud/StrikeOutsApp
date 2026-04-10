@@ -18,6 +18,7 @@ function normalizeName(name: string): string {
 interface FanGraphsRow {
   PlayerName: string;
   xFIP: number | string | null;
+  "O-Swing%": number | string | null;
   [key: string]: unknown;
 }
 
@@ -25,15 +26,20 @@ interface FanGraphsResponse {
   data?: FanGraphsRow[];
 }
 
+interface FanGraphsPitcherStats {
+  xfip: number | null;
+  o_swing_pct: number | null;
+}
+
 /**
- * Fetch the current-season pitcher xFIP leaderboard from FanGraphs.
- * Returns a Map of normalised pitcher name → xFIP value.
+ * Fetch the current-season pitcher leaderboard from FanGraphs.
+ * Returns a Map of normalised pitcher name → { xfip, o_swing_pct }.
  *
- * Uses the major-league leaderboard API (type=1 = dashboard, includes xFIP).
- * qual=0 returns all pitchers regardless of innings minimum.
+ * Uses the major-league leaderboard API (type=1 = dashboard).
+ * qual=10 filters out tiny-sample relievers with blown-up xFIP values.
  * Cached for 1 hour via Next.js fetch cache.
  */
-async function fetchFanGraphsXFIPMap(): Promise<Map<string, number>> {
+async function fetchFanGraphsStatsMap(): Promise<Map<string, FanGraphsPitcherStats>> {
   const season = new Date().getFullYear();
   const url =
     `https://www.fangraphs.com/api/leaders/major-league/data` +
@@ -52,48 +58,66 @@ async function fetchFanGraphsXFIPMap(): Promise<Map<string, number>> {
     });
 
     if (!res.ok) {
-      console.warn(`[fangraphs] xFIP fetch failed (${res.status})`);
+      console.warn(`[fangraphs] stats fetch failed (${res.status})`);
       return new Map();
     }
 
     const json = await res.json() as FanGraphsResponse;
     const rows = json?.data ?? [];
 
-    const map = new Map<string, number>();
+    const map = new Map<string, FanGraphsPitcherStats>();
     for (const row of rows) {
       if (!row.PlayerName) continue;
-      const xfip = typeof row.xFIP === "number"
-        ? row.xFIP
-        : typeof row.xFIP === "string"
-          ? parseFloat(row.xFIP)
-          : NaN;
-      // Sanity-clamp: realistic xFIP range for MLB pitchers is ~1.5–8.5.
-      // Values outside this are tiny-sample noise (1-IP relievers etc).
-      if (!isNaN(xfip) && xfip >= 1.5 && xfip <= 8.5) {
-        map.set(normalizeName(row.PlayerName), xfip);
+
+      // xFIP — sanity-clamp to [1.5, 8.5]; values outside are tiny-sample noise
+      const rawXfip = parseNumericField(row.xFIP);
+      const xfip = rawXfip !== null && rawXfip >= 1.5 && rawXfip <= 8.5 ? rawXfip : null;
+
+      // O-Swing% — FanGraphs returns as decimal (e.g. 0.304 = 30.4%)
+      // Guard against percentage format (> 1) just in case
+      const rawOSwing = parseNumericField(row["O-Swing%"]);
+      const o_swing_pct =
+        rawOSwing !== null && rawOSwing > 0 && rawOSwing <= 1
+          ? rawOSwing
+          : rawOSwing !== null && rawOSwing > 1 && rawOSwing <= 100
+            ? rawOSwing / 100
+            : null;
+
+      if (xfip !== null || o_swing_pct !== null) {
+        map.set(normalizeName(row.PlayerName), { xfip, o_swing_pct });
       }
     }
 
     return map;
   } catch (err) {
-    console.error("[fangraphs] fetchFanGraphsXFIPMap error:", err);
+    console.error("[fangraphs] fetchFanGraphsStatsMap error:", err);
     return new Map();
   }
 }
 
+function parseNumericField(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return isNaN(value) ? null : value;
+  const n = parseFloat(value);
+  return isNaN(n) ? null : n;
+}
+
 /**
- * Look up a pitcher's xFIP by name from the FanGraphs leaderboard.
+ * Look up a pitcher's xFIP and O-Swing% by name from the FanGraphs leaderboard.
  *
  * Matching strategy (same as odds-api.ts matchPropToPitcher):
  *   1. Exact normalised name match
  *   2. Last name + first initial  (handles minor name differences)
  *   3. Last name only             (only when last name length > 4)
  *
- * Returns null if no match found or xFIP data unavailable.
+ * Returns { xfip: null, o_swing_pct: null } if no match found.
  */
-export async function getPitcherXFIP(pitcherName: string): Promise<number | null> {
-  const map = await fetchFanGraphsXFIPMap();
-  if (map.size === 0) return null;
+export async function getPitcherFanGraphsStats(
+  pitcherName: string
+): Promise<FanGraphsPitcherStats> {
+  const empty: FanGraphsPitcherStats = { xfip: null, o_swing_pct: null };
+  const map = await fetchFanGraphsStatsMap();
+  if (map.size === 0) return empty;
 
   const norm = normalizeName(pitcherName);
   const parts = norm.split(" ");
@@ -105,23 +129,23 @@ export async function getPitcherXFIP(pitcherName: string): Promise<number | null
 
   // 2. Last name + first initial
   if (lastName.length > 3) {
-    for (const [key, xfip] of map) {
+    for (const [key, stats] of map) {
       const kParts = key.split(" ");
       const kLast = kParts[kParts.length - 1] ?? "";
       const kFirst = kParts[0]?.[0] ?? "";
-      if (kLast === lastName && kFirst === firstInitial) return xfip;
+      if (kLast === lastName && kFirst === firstInitial) return stats;
     }
   }
 
   // 3. Last name only (unambiguous long last names)
   if (lastName.length > 4) {
-    for (const [key, xfip] of map) {
+    for (const [key, stats] of map) {
       const kLast = key.split(" ").pop() ?? "";
-      if (kLast === lastName) return xfip;
+      if (kLast === lastName) return stats;
     }
   }
 
-  return null;
+  return empty;
 }
 
 // ============================================================
