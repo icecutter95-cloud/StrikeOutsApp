@@ -159,7 +159,8 @@ export async function GET(req: NextRequest) {
 
   // Query 2: pitcher stats cache — fetch swstr_pct and platoon splits
   // (these live in the cache, not the predictions table)
-  const pitcherIds = [...new Set(predData.map((p) => p.pitcher_id as string))];
+  const typedPreds = predData as Array<Record<string, unknown>>;
+  const pitcherIds = [...new Set(typedPreds.map((p) => p.pitcher_id as string))];
   const { data: cacheData } = await supabase
     .from("pitcher_stats_cache")
     .select("pitcher_id,swstr_pct,k_pct_vs_lhh,k_pct_vs_rhh")
@@ -173,7 +174,7 @@ export async function GET(req: NextRequest) {
   );
 
   // Merge predictions with pitcher cache stats
-  const rows: PredRow[] = predData.map((p) => {
+  const rows: PredRow[] = typedPreds.map((p) => {
     const cache = cacheMap.get(p.pitcher_id as string);
     return {
       pitcher_id: p.pitcher_id as string,
