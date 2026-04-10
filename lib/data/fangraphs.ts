@@ -37,7 +37,7 @@ async function fetchFanGraphsXFIPMap(): Promise<Map<string, number>> {
   const season = new Date().getFullYear();
   const url =
     `https://www.fangraphs.com/api/leaders/major-league/data` +
-    `?pos=all&stats=pit&lg=all&qual=0&pageitems=2000000000&pagenum=1` +
+    `?pos=all&stats=pit&lg=all&qual=10&pageitems=2000000000&pagenum=1` +
     `&ind=0&season=${season}&team=0&startdt=&enddt=&month=0` +
     `&hand=&type=1&postseason=&sortdir=desc&sortstat=xFIP`;
 
@@ -67,7 +67,9 @@ async function fetchFanGraphsXFIPMap(): Promise<Map<string, number>> {
         : typeof row.xFIP === "string"
           ? parseFloat(row.xFIP)
           : NaN;
-      if (!isNaN(xfip) && xfip > 0) {
+      // Sanity-clamp: realistic xFIP range for MLB pitchers is ~1.5–8.5.
+      // Values outside this are tiny-sample noise (1-IP relievers etc).
+      if (!isNaN(xfip) && xfip >= 1.5 && xfip <= 8.5) {
         map.set(normalizeName(row.PlayerName), xfip);
       }
     }
