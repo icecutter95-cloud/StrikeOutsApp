@@ -159,7 +159,7 @@ export async function GET(req: NextRequest) {
 
   // Query 2: pitcher stats cache — fetch swstr_pct and platoon splits
   // (these live in the cache, not the predictions table)
-  const typedPreds = predData as Array<Record<string, unknown>>;
+  const typedPreds = predData as unknown as Array<Record<string, unknown>>;
   const pitcherIds = [...new Set(typedPreds.map((p) => p.pitcher_id as string))];
   const { data: cacheData } = await supabase
     .from("pitcher_stats_cache")
