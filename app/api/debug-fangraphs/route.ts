@@ -16,9 +16,10 @@ export async function GET(req: NextRequest) {
   const pitcherName = searchParams.get("name") ?? "Corbin Burnes";
 
   const season = new Date().getFullYear();
+  // Same URL as getPitcherXFIP() — qual=10 filters out tiny-sample relievers
   const url =
     `https://www.fangraphs.com/api/leaders/major-league/data` +
-    `?pos=all&stats=pit&lg=all&qual=0&pageitems=30&pagenum=1` +
+    `?pos=all&stats=pit&lg=all&qual=10&pageitems=30&pagenum=1` +
     `&ind=0&season=${season}&team=0&startdt=&enddt=&month=0` +
     `&hand=&type=1&postseason=&sortdir=desc&sortstat=xFIP`;
 
