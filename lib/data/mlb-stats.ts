@@ -314,10 +314,14 @@ export async function getGameResult(
     const entry = team.players?.[key] as MLBBoxscorePlayerEntry | undefined;
     if (entry?.stats?.pitching) {
       const p = entry.stats.pitching;
+      const actualPitches = p.numberOfPitches ?? 0;
+      // Guard: if pitch count is 0 the boxscore stats haven't fully posted yet.
+      // Return null so close-games leaves the record as in_progress and retries.
+      if (actualPitches === 0) return null;
       return {
         actualKs: p.strikeOuts ?? 0,
         actualIp: ipToDecimal(p.inningsPitched ?? "0"),
-        actualPitches: p.numberOfPitches ?? 0
+        actualPitches
       };
     }
   }

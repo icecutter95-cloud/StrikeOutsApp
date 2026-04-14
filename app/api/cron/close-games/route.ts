@@ -140,13 +140,22 @@ async function resolveGamePk(prediction: Prediction): Promise<number | null> {
     if (!schedRes.ok) return null;
 
     const schedData = await schedRes.json() as {
-      dates?: Array<{ games: Array<{ gamePk: number }> }>;
+      dates?: Array<{
+        games: Array<{
+          gamePk: number;
+          status?: { abstractGameState?: string };
+        }>;
+      }>;
     };
 
+    // Only consider games that the MLB API has marked as Final.
+    // This prevents partially-scored West Coast games from being closed prematurely.
     const gamePks: number[] = [];
     for (const d of schedData.dates ?? []) {
       for (const g of d.games ?? []) {
-        gamePks.push(g.gamePk);
+        if (g.status?.abstractGameState === "Final") {
+          gamePks.push(g.gamePk);
+        }
       }
     }
 
