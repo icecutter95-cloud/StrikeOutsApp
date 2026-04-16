@@ -78,13 +78,33 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   const totalCount = count ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  // Compute overall stats for the history
-  const { data: allFinal } = await supabase
+  // Compute overall stats — same filters as the table (minus edge_tier and pagination)
+  // so the summary numbers always reflect the active filter combination.
+  let statsQuery = supabase
     .from("predictions")
     .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks")
     .eq("game_status", "final");
 
+  if (searchParams.date_from)    statsQuery = statsQuery.gte("game_date", searchParams.date_from);
+  if (searchParams.date_to)      statsQuery = statsQuery.lte("game_date", searchParams.date_to);
+  if (searchParams.lineup_status) statsQuery = statsQuery.eq("lineup_confirmation_status", searchParams.lineup_status);
+  if (searchParams.bet_placed === "true") statsQuery = statsQuery.eq("user_bet_placed", true);
+  if (searchParams.k_line)       statsQuery = statsQuery.eq("prop_line", parseFloat(searchParams.k_line));
+  if (searchParams.recommendation) statsQuery = statsQuery.eq("recommendation", searchParams.recommendation);
+
+  const { data: allFinal } = await statsQuery;
   const allPredictions = (allFinal ?? []) as Partial<Prediction>[];
+
+  // Build a human-readable label for any active filters so it's clear what the stats are scoped to
+  const activeFilterLabels: string[] = [];
+  if (searchParams.k_line)        activeFilterLabels.push(`${searchParams.k_line} K line`);
+  if (searchParams.recommendation) activeFilterLabels.push(searchParams.recommendation === "BET_OVER" ? "Overs only" : "Unders only");
+  if (searchParams.date_from || searchParams.date_to) {
+    activeFilterLabels.push(`${searchParams.date_from ?? "start"} → ${searchParams.date_to ?? "today"}`);
+  }
+  if (searchParams.lineup_status) activeFilterLabels.push(`${searchParams.lineup_status} lineups`);
+  if (searchParams.bet_placed === "true") activeFilterLabels.push("bet placed");
+  const filterLabel = activeFilterLabels.length > 0 ? activeFilterLabels.join(" · ") : null;
 
   // Stats by edge tier
   const tierStats = edgeTiers.map((tier) => {
@@ -148,27 +168,47 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
       {/* Overall accuracy */}
       {overallAccuracy !== null && (
-        <div className="flex items-center gap-6 rounded-xl border border-slate-700 bg-slate-800 p-4">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-400">Overall Accuracy</p>
-            <p className="text-2xl font-bold text-white">
-              {overallAccuracy.toFixed(1)}%
-            </p>
-            <p className="text-xs text-slate-500">{withResult.length} decided bets</p>
-          </div>
-          {mae !== null && (
-            <div className="border-l border-slate-700 pl-6">
-              <p className="text-xs uppercase tracking-wide text-slate-400">Avg Projection Error</p>
-              <p className="text-2xl font-bold text-white">{mae.toFixed(2)} Ks</p>
-              <p className="text-xs text-slate-500">{withKs.length} predictions</p>
+        <div className="rounded-xl border border-slate-700 bg-slate-800 p-4 space-y-3">
+          {filterLabel && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-amber-400 font-medium">
+                Filtered: {filterLabel}
+              </p>
+              <a
+                href="/history"
+                className="text-xs text-slate-400 hover:text-white underline"
+              >
+                Clear filters
+              </a>
             </div>
           )}
+          <div className="flex items-center gap-6">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Overall Accuracy</p>
+              <p className="text-2xl font-bold text-white">
+                {overallAccuracy.toFixed(1)}%
+              </p>
+              <p className="text-xs text-slate-500">{withResult.length} decided bets</p>
+            </div>
+            {mae !== null && (
+              <div className="border-l border-slate-700 pl-6">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Avg Projection Error</p>
+                <p className="text-2xl font-bold text-white">{mae.toFixed(2)} Ks</p>
+                <p className="text-xs text-slate-500">{withKs.length} predictions</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* Stats by edge tier */}
       <section>
-        <h2 className="mb-3 text-lg font-semibold text-white">Performance by Edge Tier</h2>
+        <h2 className="mb-3 text-lg font-semibold text-white">
+          Performance by Edge Tier
+          {filterLabel && (
+            <span className="ml-2 text-sm font-normal text-amber-400">({filterLabel})</span>
+          )}
+        </h2>
         <StatsTable tierStats={tierStats} activeTierMin={activeTierMin} />
       </section>
 
