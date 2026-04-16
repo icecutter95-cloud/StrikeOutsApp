@@ -13,6 +13,8 @@ interface PageProps {
     edge_tier?: string;   // min value as string e.g. "0.04"
     lineup_status?: string;
     bet_placed?: string;
+    k_line?: string;      // prop line e.g. "4.5"
+    recommendation?: string; // "BET_OVER" | "BET_UNDER"
   };
 }
 
@@ -63,6 +65,12 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   }
   if (searchParams.bet_placed === "true") {
     query = query.eq("user_bet_placed", true);
+  }
+  if (searchParams.k_line) {
+    query = query.eq("prop_line", parseFloat(searchParams.k_line));
+  }
+  if (searchParams.recommendation) {
+    query = query.eq("recommendation", searchParams.recommendation);
   }
 
   const { data, count, error } = await query;
@@ -257,6 +265,32 @@ function HistoryFilters({
       >
         <option value="">All</option>
         <option value="true">Bet Placed</option>
+      </select>
+      <select
+        name="k_line"
+        defaultValue={searchParams.k_line ?? ""}
+        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white"
+      >
+        <option value="">All K Lines</option>
+        <option value="0.5">0.5</option>
+        <option value="1.5">1.5</option>
+        <option value="2.5">2.5</option>
+        <option value="3.5">3.5</option>
+        <option value="4.5">4.5</option>
+        <option value="5.5">5.5</option>
+        <option value="6.5">6.5</option>
+        <option value="7.5">7.5</option>
+        <option value="8.5">8.5</option>
+        <option value="9.5">9.5</option>
+      </select>
+      <select
+        name="recommendation"
+        defaultValue={searchParams.recommendation ?? ""}
+        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white"
+      >
+        <option value="">Over &amp; Under</option>
+        <option value="BET_OVER">Over only</option>
+        <option value="BET_UNDER">Under only</option>
       </select>
       <button
         type="submit"
