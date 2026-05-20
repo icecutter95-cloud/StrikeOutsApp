@@ -80,11 +80,13 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
   // Compute overall stats — same filters as the table (minus edge_tier and pagination)
   // so the summary numbers always reflect the active filter combination.
+  // No .order() here — Supabase applies a default 1000-row limit when ordering,
+  // which would truncate the dataset. Fetch all records unordered and sort in JS.
   let statsQuery = supabase
     .from("predictions")
     .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks,game_date")
     .eq("game_status", "final")
-    .order("game_date", { ascending: false });
+    .limit(10000);
 
   if (searchParams.date_from)    statsQuery = statsQuery.gte("game_date", searchParams.date_from);
   if (searchParams.date_to)      statsQuery = statsQuery.lte("game_date", searchParams.date_to);
@@ -141,8 +143,12 @@ export default async function HistoryPage({ searchParams }: PageProps) {
         return sum;
       }, 0);
 
-    const last10 = sliceRecord(tiered, 10);
-    const last20 = sliceRecord(tiered, 20);
+    // Sort date-desc in JS for the recency slices (avoids Supabase row-limit issues)
+    const tieredByDate = [...tiered].sort((a, b) =>
+      (b.game_date ?? "").localeCompare(a.game_date ?? "")
+    );
+    const last10 = sliceRecord(tieredByDate, 10);
+    const last20 = sliceRecord(tieredByDate, 20);
 
     return {
       tier: tier.label,
