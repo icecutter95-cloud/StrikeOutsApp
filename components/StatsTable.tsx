@@ -2,6 +2,12 @@
 
 import { useRouter } from "next/navigation";
 
+interface RecentRecord {
+  wins: number;
+  losses: number;
+  count: number; // actual bets in window (may be < 10/20 if tier has fewer)
+}
+
 interface TierStat {
   tier: string;
   min: number;
@@ -11,11 +17,32 @@ interface TierStat {
   wins: number;
   losses: number;
   roi: number;
+  last10?: RecentRecord;
+  last20?: RecentRecord;
 }
 
 interface StatsTableProps {
   tierStats: TierStat[];
   activeTierMin?: number | null;
+}
+
+function RecentRecordCell({ record }: { record?: RecentRecord }) {
+  if (!record || record.count === 0) {
+    return <span className="text-slate-600">—</span>;
+  }
+  const pct = record.wins / record.count;
+  const color =
+    pct >= 0.55 ? "text-green-400" : pct >= 0.50 ? "text-slate-300" : "text-red-400";
+  return (
+    <span className={`font-medium ${color}`}>
+      {record.wins}-{record.losses}
+      {record.count < 10 && (
+        <span className="ml-1 text-xs font-normal text-slate-500">
+          ({record.count})
+        </span>
+      )}
+    </span>
+  );
 }
 
 export default function StatsTable({ tierStats, activeTierMin }: StatsTableProps) {
@@ -54,6 +81,12 @@ export default function StatsTable({ tierStats, activeTierMin }: StatsTableProps
             </th>
             <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-slate-400">
               Accuracy
+            </th>
+            <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-slate-400">
+              Last 10
+            </th>
+            <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-slate-400">
+              Last 20
             </th>
             <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-slate-400">
               ROI (units)
@@ -109,6 +142,12 @@ export default function StatsTable({ tierStats, activeTierMin }: StatsTableProps
                   ) : (
                     <span className="text-slate-600">—</span>
                   )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <RecentRecordCell record={row.last10} />
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <RecentRecordCell record={row.last20} />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <span

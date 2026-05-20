@@ -82,8 +82,9 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   // so the summary numbers always reflect the active filter combination.
   let statsQuery = supabase
     .from("predictions")
-    .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks")
-    .eq("game_status", "final");
+    .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks,game_date")
+    .eq("game_status", "final")
+    .order("game_date", { ascending: false });
 
   if (searchParams.date_from)    statsQuery = statsQuery.gte("game_date", searchParams.date_from);
   if (searchParams.date_to)      statsQuery = statsQuery.lte("game_date", searchParams.date_to);
@@ -105,6 +106,17 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   if (searchParams.lineup_status) activeFilterLabels.push(`${searchParams.lineup_status} lineups`);
   if (searchParams.bet_placed === "true") activeFilterLabels.push("bet placed");
   const filterLabel = activeFilterLabels.length > 0 ? activeFilterLabels.join(" · ") : null;
+
+  // Helper: compute W-L record for a slice of predictions
+  function sliceRecord(preds: Partial<Prediction>[], n: number) {
+    // preds already sorted date-desc from the query; take first n decided bets
+    const decided = preds.filter((p) => p.model_correct !== null).slice(0, n);
+    return {
+      wins: decided.filter((p) => p.model_correct === true).length,
+      losses: decided.filter((p) => p.model_correct === false).length,
+      count: decided.length
+    };
+  }
 
   // Stats by edge tier
   const tierStats = edgeTiers.map((tier) => {
@@ -128,6 +140,10 @@ export default async function HistoryPage({ searchParams }: PageProps) {
         if (p.bet_result === "loss") return sum - (p.user_bet_units ?? 1);
         return sum;
       }, 0);
+
+    const last10 = sliceRecord(tiered, 10);
+    const last20 = sliceRecord(tiered, 20);
+
     return {
       tier: tier.label,
       min: tier.min,
@@ -137,7 +153,9 @@ export default async function HistoryPage({ searchParams }: PageProps) {
         withResult.length > 0 ? (correct / withResult.length) * 100 : null,
       wins,
       losses,
-      roi: units
+      roi: units,
+      last10,
+      last20
     };
   });
 
