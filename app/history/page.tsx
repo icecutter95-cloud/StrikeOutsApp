@@ -78,25 +78,37 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   const totalCount = count ?? 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
-  // Compute overall stats — same filters as the table (minus edge_tier and pagination)
-  // so the summary numbers always reflect the active filter combination.
-  // No .order() here — Supabase applies a default 1000-row limit when ordering,
-  // which would truncate the dataset. Fetch all records unordered and sort in JS.
-  let statsQuery = supabase
-    .from("predictions")
-    .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks,game_date")
-    .eq("game_status", "final")
-    .limit(10000);
+  // Compute overall stats — same filters as the table (minus edge_tier and pagination).
+  // Paginate in batches of 1000 to bypass PostgREST's server-side max-rows cap,
+  // which silently truncates both .limit() and single .range() calls.
+  const STATS_BATCH = 1000;
 
-  if (searchParams.date_from)    statsQuery = statsQuery.gte("game_date", searchParams.date_from);
-  if (searchParams.date_to)      statsQuery = statsQuery.lte("game_date", searchParams.date_to);
-  if (searchParams.lineup_status) statsQuery = statsQuery.eq("lineup_confirmation_status", searchParams.lineup_status);
-  if (searchParams.bet_placed === "true") statsQuery = statsQuery.eq("user_bet_placed", true);
-  if (searchParams.k_line)       statsQuery = statsQuery.eq("prop_line", parseFloat(searchParams.k_line));
-  if (searchParams.recommendation) statsQuery = statsQuery.eq("recommendation", searchParams.recommendation);
+  function buildStatsQuery(from: number) {
+    let q = supabase
+      .from("predictions")
+      .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks,game_date")
+      .eq("game_status", "final")
+      .range(from, from + STATS_BATCH - 1);
 
-  const { data: allFinal } = await statsQuery;
-  const allPredictions = (allFinal ?? []) as Partial<Prediction>[];
+    if (searchParams.date_from)     q = q.gte("game_date", searchParams.date_from);
+    if (searchParams.date_to)       q = q.lte("game_date", searchParams.date_to);
+    if (searchParams.lineup_status) q = q.eq("lineup_confirmation_status", searchParams.lineup_status);
+    if (searchParams.bet_placed === "true") q = q.eq("user_bet_placed", true);
+    if (searchParams.k_line)        q = q.eq("prop_line", parseFloat(searchParams.k_line));
+    if (searchParams.recommendation) q = q.eq("recommendation", searchParams.recommendation);
+
+    return q;
+  }
+
+  const allPredictions: Partial<Prediction>[] = [];
+  let batchOffset = 0;
+  while (true) {
+    const { data: batch, error: batchError } = await buildStatsQuery(batchOffset);
+    if (batchError || !batch || batch.length === 0) break;
+    allPredictions.push(...(batch as Partial<Prediction>[]));
+    if (batch.length < STATS_BATCH) break;
+    batchOffset += STATS_BATCH;
+  }
 
   // Build a human-readable label for any active filters so it's clear what the stats are scoped to
   const activeFilterLabels: string[] = [];
