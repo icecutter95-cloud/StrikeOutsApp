@@ -20,9 +20,17 @@ const LEAGUE_AVG_K_PCT = 0.225;
 const LEAGUE_AVG_OSWING = 0.30;
 
 // Default pitcher workload constants
+// MAX_IP reduced from 7.0 → 6.0: 2025 MLB starters average ~5.1 IP/start,
+// and projecting 6.5-7 IP systematically inflates K totals and causes over failures.
 const PITCHES_PER_INNING = 15.5;
-const MAX_IP = 7.0;
+const MAX_IP = 6.0;
 const MIN_IP = 3.0;
+
+// Additional edge required for an over recommendation vs an under.
+// Data shows model over recommendations hit ~50% below 25% edge (coin flip),
+// while unders are profitable starting at 10%+ edge. Requiring an 8% premium
+// for overs eliminates the negative-EV middle tiers without touching the model.
+const OVER_EDGE_PREMIUM = 0.08;
 
 // CSW calibration: CSW% of ~28% ≈ 7 K/9 historically
 // Linear: K/9 ≈ CSW% * 25 (empirical)
@@ -244,7 +252,15 @@ export async function generateProjection(
       const adjustedEdgeOver = edgeOver - lineupPenalty;
       const adjustedEdgeUnder = edgeUnder - lineupPenalty;
 
-      if (adjustedEdgeOver > adjustedEdgeUnder && adjustedEdgeOver > 0) {
+      // Overs require OVER_EDGE_PREMIUM more edge than unders before recommending.
+      // Data (706 decided bets): overs below ~25% edge are coin-flip or worse;
+      // unders are profitable from 10%+ edge. The premium eliminates the negative-EV
+      // middle tiers on overs without touching the model's K projection logic.
+      const effectiveOverThreshold = OVER_EDGE_PREMIUM; // edge must exceed under edge by this margin
+      if (
+        adjustedEdgeOver > adjustedEdgeUnder + effectiveOverThreshold &&
+        adjustedEdgeOver > 0
+      ) {
         edgePct = adjustedEdgeOver;
         recommendation = "BET_OVER";
       } else if (adjustedEdgeUnder > adjustedEdgeOver && adjustedEdgeUnder > 0) {
@@ -338,18 +354,27 @@ function computeXFIPK9(stats: PitcherStats): number {
 }
 
 function computeProjectedIP(stats: PitcherStats): number {
+  // Prefer last3_ip — this is the pitcher's actual average IP over his last 3 starts,
+  // a direct measurement rather than a pitch-count derivation. More accurate in-season
+  // because it captures real workload, manager tendencies, and recent stamina.
+  if (stats.last3_ip !== null && stats.last3_ip > 0) {
+    return Math.max(MIN_IP, Math.min(MAX_IP, stats.last3_ip));
+  }
+
+  // Secondary: derive from season-average pitch count
+  // (less accurate due to pitches-per-inning calibration assumptions)
   const avgPitches = stats.avg_pitches_per_start;
   if (avgPitches !== null && avgPitches > 0) {
     const projectedInnings = avgPitches / PITCHES_PER_INNING;
     return Math.max(MIN_IP, Math.min(MAX_IP, projectedInnings));
   }
 
-  // Fallback: use last start as a proxy
+  // Final fallback: last start IP
   if (stats.last_start_ip !== null) {
     return Math.max(MIN_IP, Math.min(MAX_IP, stats.last_start_ip));
   }
 
-  return 5.5; // neutral fallback
+  return 5.1; // 2025 MLB average IP per start
 }
 
 interface LineupFactorResult {
@@ -424,8 +449,10 @@ function computeLineupFactor(
   const avgLineupKPct = weightedKPct / totalWeight;
   const lineupMultiplier = avgLineupKPct / LEAGUE_AVG_K_PCT;
 
+  // Cap at ±20% (was ±40%). With partial/noisy lineup data a 40% swing
+  // amplifies projection variance more than it adds signal.
   return {
-    lineupMultiplier: Math.max(0.7, Math.min(1.4, lineupMultiplier)),
+    lineupMultiplier: Math.max(0.80, Math.min(1.20, lineupMultiplier)),
     lineupKVulnerability: avgLineupKPct,
     lineupStatus
   };
