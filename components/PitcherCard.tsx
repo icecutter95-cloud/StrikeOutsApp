@@ -177,24 +177,38 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
 }
 
 function LineMoveBadge({ prediction }: { prediction: Prediction }) {
-  const { opening_line, prop_line } = prediction;
-  if (opening_line === null || prop_line === null) return null;
-  if (opening_line === prop_line) return null;
+  const { opening_line, prop_line, steam_flag, steam_direction } = prediction;
 
-  const direction = prop_line > opening_line ? "↑" : "↓";
-  const colorClass =
-    prop_line < opening_line
-      ? "bg-orange-900/40 text-orange-400"   // line dropped — over got cheaper, under harder
-      : "bg-sky-900/40 text-sky-400";        // line rose — over harder, under cheaper
+  // Coerce to number — Supabase DECIMAL columns can come back as strings
+  const open = opening_line !== null ? Number(opening_line) : null;
+  const cur  = prop_line    !== null ? Number(prop_line)    : null;
 
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
-      title="Prop line has moved since opening"
-    >
-      Line: {opening_line.toFixed(1)}→{prop_line.toFixed(1)} {direction}
-    </span>
-  );
+  // Primary: we have both values and the line actually moved
+  if (open !== null && cur !== null && open !== cur) {
+    const direction  = cur > open ? "↑" : "↓";
+    const colorClass = cur < open
+      ? "bg-orange-900/40 text-orange-400"  // line dropped
+      : "bg-sky-900/40 text-sky-400";       // line rose
+    return (
+      <span
+        className={`rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
+        title="Prop line has moved since opening"
+      >
+        Line: {open.toFixed(1)}→{cur.toFixed(1)} {direction}
+      </span>
+    );
+  }
+
+  // Fallback: opening_line not stored but steam was detected by the cron
+  if (steam_flag) {
+    return (
+      <span className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400">
+        Steam {steam_direction === "up" ? "↑" : "↓"}
+      </span>
+    );
+  }
+
+  return null;
 }
 
 function impliedProb(odds: number): number {
