@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
           prop_line: propLine,
           prop_odds_over: propOddsOver,
           prop_odds_under: propOddsUnder,
-          opening_line: existingOdds?.opening_line ?? null,
+          // opening_line is intentionally excluded — set once via conditional update below
           edge_pct: existingOdds && !matchedProp ? existingOdds.edge_pct : projection.edge_pct,
           model_prob_over: existingOdds && !matchedProp ? existingOdds.model_prob_over : projection.model_prob_over,
           model_prob_under: existingOdds && !matchedProp ? existingOdds.model_prob_under : projection.model_prob_under,
@@ -276,6 +276,17 @@ export async function POST(req: NextRequest) {
 
         if (upsertErr) {
           console.error(`[projections] Upsert error for ${game.pitcher_name}:`, upsertErr);
+        }
+
+        // Set opening_line only on the very first upsert (never overwrite).
+        // Done as a separate conditional update so re-runs don't clobber the
+        // original line — which is the reference point for steam/line-move detection.
+        if (upserted?.id && propLine !== null) {
+          await supabase
+            .from("predictions")
+            .update({ opening_line: propLine })
+            .eq("id", upserted.id)
+            .is("opening_line", null);
         }
 
         projectionResults.push({
