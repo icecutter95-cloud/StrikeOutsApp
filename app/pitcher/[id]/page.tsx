@@ -364,7 +364,7 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
           {/* Odds movement */}
           <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
             <h2 className="mb-4 text-lg font-semibold text-white">Odds Movement</h2>
-            <OddsMovementChart snapshots={lineSnapshots} />
+            <OddsMovementChart snapshots={lineSnapshots} projectedKs={prediction.projected_ks} />
           </section>
 
           {/* Line movement — only interesting if line actually moved */}
