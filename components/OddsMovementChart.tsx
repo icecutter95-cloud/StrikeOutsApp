@@ -16,6 +16,7 @@ import { format } from "date-fns";
 interface OddsMovementChartProps {
   snapshots: LineSnapshot[];
   projectedKs?: number | null;
+  recommendation?: string | null;
 }
 
 interface ChartPoint {
@@ -25,7 +26,7 @@ interface ChartPoint {
   underProb: number;
   oddsOver: number | null;
   oddsUnder: number | null;
-  modelUnderProb: number | null;
+  modelSideProb: number | null; // P(Over) or P(Under) depending on recommendation
 }
 
 interface TooltipProps {
@@ -59,7 +60,7 @@ function fmt(odds: number): string {
   return odds > 0 ? `+${odds}` : String(odds);
 }
 
-export default function OddsMovementChart({ snapshots, projectedKs }: OddsMovementChartProps) {
+export default function OddsMovementChart({ snapshots, projectedKs, recommendation }: OddsMovementChartProps) {
   const validSnaps = snapshots.filter(
     (s) => s.odds_over !== null && s.odds_under !== null
   );
@@ -73,14 +74,16 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
   }
 
   const showModel = projectedKs !== null && projectedKs !== undefined && projectedKs > 0;
+  const isOver = recommendation === "BET_OVER";
+  const modelSideLabel = isOver ? "Over" : "Under";
 
   const data: ChartPoint[] = validSnaps.map((s) => {
     const propLine = Number(s.line);
-    const modelUnderProb =
-      showModel
-        ? poissonCDF(Math.floor(propLine), projectedKs!) * 100
-        : null;
-
+    let modelSideProb: number | null = null;
+    if (showModel) {
+      const pUnder = poissonCDF(Math.floor(propLine), projectedKs!) * 100;
+      modelSideProb = isOver ? 100 - pUnder : pUnder;
+    }
     return {
       time: format(new Date(s.created_at), "h:mm a"),
       propLine,
@@ -88,7 +91,7 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
       underProb: toImpliedProb(s.odds_under!),
       oddsOver: s.odds_over,
       oddsUnder: s.odds_under,
-      modelUnderProb
+      modelSideProb
     };
   });
 
@@ -98,17 +101,18 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
 
   // Y-axis domain: cover all three series
   const allProbs = data.flatMap((d) =>
-    d.modelUnderProb !== null
-      ? [d.overProb, d.underProb, d.modelUnderProb]
+    d.modelSideProb !== null
+      ? [d.overProb, d.underProb, d.modelSideProb]
       : [d.overProb, d.underProb]
   );
   const minY = Math.floor(Math.min(...allProbs)) - 3;
   const maxY = Math.ceil(Math.max(...allProbs)) + 3;
 
-  // Current model edge on the under
+  // Current model edge on the recommended side
+  const bookSideProb = isOver ? last.overProb : last.underProb;
   const currentModelEdge =
-    showModel && last.modelUnderProb !== null
-      ? last.modelUnderProb - last.underProb
+    showModel && last.modelSideProb !== null
+      ? last.modelSideProb - bookSideProb
       : null;
 
   return (
@@ -134,7 +138,7 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
         {showModel && currentModelEdge !== null && (
           <div className="space-y-0.5">
             <p className="text-xs uppercase tracking-wide text-slate-500">
-              Model Edge (Under {last.propLine.toFixed(1)})
+              Model Edge ({modelSideLabel} {last.propLine.toFixed(1)})
             </p>
             <p className={`font-bold ${currentModelEdge >= 0 ? "text-amber-400" : "text-red-400"}`}>
               {currentModelEdge >= 0 ? "+" : ""}{currentModelEdge.toFixed(1)}%
@@ -167,7 +171,7 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
         {showModel && (
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />
-            Model P(Under) — Poisson, proj. {projectedKs!.toFixed(1)} Ks
+            Model P({modelSideLabel}) — Poisson, proj. {projectedKs!.toFixed(1)} Ks
           </span>
         )}
       </div>
@@ -189,7 +193,7 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
             tickFormatter={(v: number) => `${v.toFixed(0)}%`}
             width={40}
           />
-          <Tooltip content={<CustomTooltip showModel={showModel} />} />
+          <Tooltip content={<CustomTooltip showModel={showModel} isOver={isOver} modelSideLabel={modelSideLabel} />} />
           {/* 50% = fair-value reference */}
           <ReferenceLine
             y={50}
@@ -216,7 +220,7 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
           {showModel && (
             <Line
               type="stepAfter"
-              dataKey="modelUnderProb"
+              dataKey="modelSideProb"
               stroke="#fbbf24"
               strokeWidth={2}
               strokeDasharray="6 3"
@@ -230,20 +234,27 @@ export default function OddsMovementChart({ snapshots, projectedKs }: OddsMoveme
       <p className="text-xs text-slate-500">
         Book lines = implied probability from American odds.
         {showModel && (
-          <> Yellow dashed = model&apos;s P(Under) computed via Poisson distribution at each snapshot&apos;s prop line.
-          Gap between yellow and blue = model edge on the under.</>
+          <> Yellow dashed = model&apos;s P({modelSideLabel}) via Poisson at each snapshot&apos;s prop line (proj. {projectedKs!.toFixed(1)} Ks).
+          Gap between yellow and {isOver ? "green" : "blue"} = model edge on the {modelSideLabel.toLowerCase()}.</>
         )}
       </p>
     </div>
   );
 }
 
-function CustomTooltip({ active, payload, showModel }: TooltipProps & { showModel: boolean }) {
+function CustomTooltip({
+  active,
+  payload,
+  showModel,
+  isOver,
+  modelSideLabel
+}: TooltipProps & { showModel: boolean; isOver: boolean; modelSideLabel: string }) {
   if (!active || !payload || payload.length === 0) return null;
   const d = payload[0].payload;
+  const bookSideProb = isOver ? d.overProb : d.underProb;
   const edge =
-    showModel && d.modelUnderProb !== null
-      ? d.modelUnderProb - d.underProb
+    showModel && d.modelSideProb !== null
+      ? d.modelSideProb - bookSideProb
       : null;
 
   return (
@@ -262,10 +273,10 @@ function CustomTooltip({ active, payload, showModel }: TooltipProps & { showMode
         Under: <span className="font-bold">{d.oddsUnder !== null ? fmt(d.oddsUnder) : "—"}</span>
         <span className="ml-1.5 text-xs text-slate-400">({d.underProb.toFixed(1)}%)</span>
       </p>
-      {showModel && d.modelUnderProb !== null && (
+      {showModel && d.modelSideProb !== null && (
         <>
           <p className="mt-1 text-amber-400">
-            Model P(Under): <span className="font-bold">{d.modelUnderProb.toFixed(1)}%</span>
+            Model P({modelSideLabel}): <span className="font-bold">{d.modelSideProb.toFixed(1)}%</span>
           </p>
           {edge !== null && (
             <p className={`text-xs mt-0.5 ${edge >= 0 ? "text-amber-300" : "text-red-400"}`}>
