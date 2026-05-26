@@ -88,16 +88,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
         {/* Status flags */}
         <div className="mt-3 flex flex-wrap gap-1.5">
           <LineupBadge status={prediction.lineup_confirmation_status} />
-          {prediction.steam_flag && (
-            <span
-              className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400"
-              title="Prop line has moved since opening"
-            >
-              {prediction.opening_line !== null && prediction.prop_line !== null
-                ? `Line: ${prediction.opening_line.toFixed(1)}→${prediction.prop_line.toFixed(1)} ${prediction.steam_direction === "up" ? "↑" : "↓"}`
-                : `Steam ${prediction.steam_direction === "up" ? "↑" : "↓"}`}
-            </span>
-          )}
+          <LineMoveBadge prediction={prediction} />
           <OddsShiftBadge prediction={prediction} />
           <DivergenceBadge prediction={prediction} />
           {prediction.game_status === "final" && (
@@ -181,6 +172,27 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
       }`}
     >
       {prediction.actual_ks} Ks {prediction.model_correct ? "✓" : "✗"}
+    </span>
+  );
+}
+
+function LineMoveBadge({ prediction }: { prediction: Prediction }) {
+  const { opening_line, prop_line } = prediction;
+  if (opening_line === null || prop_line === null) return null;
+  if (opening_line === prop_line) return null;
+
+  const direction = prop_line > opening_line ? "↑" : "↓";
+  const colorClass =
+    prop_line < opening_line
+      ? "bg-orange-900/40 text-orange-400"   // line dropped — over got cheaper, under harder
+      : "bg-sky-900/40 text-sky-400";        // line rose — over harder, under cheaper
+
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
+      title="Prop line has moved since opening"
+    >
+      Line: {opening_line.toFixed(1)}→{prop_line.toFixed(1)} {direction}
     </span>
   );
 }
