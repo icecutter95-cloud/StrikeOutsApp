@@ -208,7 +208,7 @@ function OddsShiftBadge({ prediction }: { prediction: Prediction }) {
   if (!openOdds || !curOdds || openOdds === curOdds) return null;
 
   const shift = impliedProb(curOdds) - impliedProb(openOdds); // positive = more money on this side
-  if (Math.abs(shift) < 1.5) return null; // < 1.5% implied prob shift — not worth showing
+  if (Math.abs(shift) < 0.015) return null; // < 1.5% implied prob shift — not worth showing
 
   // Market confirming your recommendation? Green. Fading it? Amber.
   const confirms = shift > 0;
