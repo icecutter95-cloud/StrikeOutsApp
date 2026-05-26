@@ -81,9 +81,13 @@ export async function GET(req: NextRequest) {
         prop_odds_under: matchedProp.odds_under
       };
 
-      // Set opening line + opening odds on first snapshot (never overwrite)
+      // Set opening line on first snapshot (never overwrite)
       if (!prediction.opening_line) {
         updates.opening_line = matchedProp.line;
+      }
+      // Set opening odds independently — may be null even if opening_line is set
+      // (e.g. predictions that existed before the opening_odds columns were added)
+      if (!prediction.opening_odds_over) {
         updates.opening_odds_over = matchedProp.odds_over;
         updates.opening_odds_under = matchedProp.odds_under;
       }
