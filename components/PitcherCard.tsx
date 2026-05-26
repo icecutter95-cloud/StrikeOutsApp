@@ -89,8 +89,13 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
         <div className="mt-3 flex flex-wrap gap-1.5">
           <LineupBadge status={prediction.lineup_confirmation_status} />
           {prediction.steam_flag && (
-            <span className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400">
-              Steam {prediction.steam_direction === "up" ? "↑" : "↓"}
+            <span
+              className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400"
+              title="Prop line has moved since opening"
+            >
+              {prediction.opening_line !== null && prediction.prop_line !== null
+                ? `Line: ${prediction.opening_line.toFixed(1)}→${prediction.prop_line.toFixed(1)} ${prediction.steam_direction === "up" ? "↑" : "↓"}`
+                : `Steam ${prediction.steam_direction === "up" ? "↑" : "↓"}`}
             </span>
           )}
           <OddsShiftBadge prediction={prediction} />
