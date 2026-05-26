@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 interface DashboardControlsProps {
   date: string;
-  sort: "edge" | "time";
+  sort: "edge" | "time" | "move";
 }
 
 export default function DashboardControls({ date, sort }: DashboardControlsProps) {
@@ -40,7 +40,7 @@ export default function DashboardControls({ date, sort }: DashboardControlsProps
     router.push(`/?date=${newDate}&sort=${sort}`);
   };
 
-  const handleSort = (newSort: "edge" | "time") => {
+  const handleSort = (newSort: "edge" | "time" | "move") => {
     router.push(`/?date=${date}&sort=${newSort}`);
   };
 
@@ -71,6 +71,16 @@ export default function DashboardControls({ date, sort }: DashboardControlsProps
           }`}
         >
           Game Time
+        </button>
+        <button
+          onClick={() => handleSort("move")}
+          className={`px-3 py-2 transition-colors border-l border-slate-600 ${
+            sort === "move"
+              ? "bg-brand text-white"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+          }`}
+        >
+          Odds Move
         </button>
       </div>
 

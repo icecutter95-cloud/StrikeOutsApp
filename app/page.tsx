@@ -10,11 +10,29 @@ interface PageProps {
 
 export const revalidate = 0; // Always fetch fresh
 
+/** Compute the largest implied-probability shift (0–1) across either side for a prediction. */
+function oddsMovementScore(p: Prediction): number {
+  function ip(odds: number) {
+    return odds > 0 ? 100 / (odds + 100) : Math.abs(odds) / (Math.abs(odds) + 100);
+  }
+  const overShift =
+    p.opening_odds_over && p.prop_odds_over
+      ? Math.abs(ip(p.prop_odds_over) - ip(p.opening_odds_over))
+      : 0;
+  const underShift =
+    p.opening_odds_under && p.prop_odds_under
+      ? Math.abs(ip(p.prop_odds_under) - ip(p.opening_odds_under))
+      : 0;
+  return Math.max(overShift, underShift);
+}
+
 export default async function DashboardPage({ searchParams }: PageProps) {
   const date = searchParams.date ?? toDateString(new Date());
-  const sort = searchParams.sort === "time" ? "time" : "edge";
+  const sort = searchParams.sort === "time" ? "time" : searchParams.sort === "move" ? "move" : "edge";
 
   const supabase = await createClient();
+
+  // "move" sort is computed client-side; fetch ordered by edge_pct as a stable base
   const { data: predictions, error } = await supabase
     .from("predictions")
     .select("*")
@@ -24,7 +42,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       { ascending: sort === "time" }
     );
 
-  const allPredictions = (predictions ?? []) as Prediction[];
+  let allPredictions = (predictions ?? []) as Prediction[];
+
+  // Sort by biggest implied-odds move if requested
+  if (sort === "move") {
+    allPredictions = [...allPredictions].sort(
+      (a, b) => oddsMovementScore(b) - oddsMovementScore(a)
+    );
+  }
 
   // Summary stats
   const totalGames = allPredictions.length;
@@ -46,7 +71,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             MLB Pitcher Strikeout Props — {formatDate(date)}
           </p>
         </div>
-        <DashboardControls date={date} sort={sort} />
+        <DashboardControls date={date} sort={sort as "edge" | "time" | "move"} />
       </div>
 
       {/* Summary bar */}

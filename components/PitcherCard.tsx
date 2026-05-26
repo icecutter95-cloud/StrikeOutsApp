@@ -217,13 +217,15 @@ function OddsShiftBadge({ prediction }: { prediction: Prediction }) {
     : "bg-amber-900/40 text-amber-400";
 
   const sideLabel = isOver ? "O" : "U";
+  const shiftLabel = `${shift > 0 ? "+" : ""}${(shift * 100).toFixed(1)}%`;
 
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
       title={`${isOver ? "Over" : "Under"} odds at open vs now. ${confirms ? "Market agrees with recommendation." : "Market fading recommendation."}`}
     >
-      {sideLabel}: {fmtOdds(openOdds)}→{fmtOdds(curOdds)}
+      {sideLabel}: {fmtOdds(openOdds)}→{fmtOdds(curOdds)}{" "}
+      <span className="opacity-75">({shiftLabel})</span>
     </span>
   );
 }
