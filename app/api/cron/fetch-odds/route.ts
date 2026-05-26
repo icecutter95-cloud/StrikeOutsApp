@@ -81,9 +81,11 @@ export async function GET(req: NextRequest) {
         prop_odds_under: matchedProp.odds_under
       };
 
-      // Set opening line on first snapshot
+      // Set opening line + opening odds on first snapshot (never overwrite)
       if (!prediction.opening_line) {
         updates.opening_line = matchedProp.line;
+        updates.opening_odds_over = matchedProp.odds_over;
+        updates.opening_odds_under = matchedProp.odds_under;
       }
 
       // Steam detection: compare current line to opening line

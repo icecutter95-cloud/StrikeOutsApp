@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import type { Prediction, LineSnapshot } from "@/lib/types";
 import LineMovementChart from "@/components/LineMovementChart";
+import OddsMovementChart from "@/components/OddsMovementChart";
 import LineupTable from "@/components/LineupTable";
 import BetLogger from "@/components/BetLogger";
 import {
@@ -357,12 +358,24 @@ export default async function PitcherDetailPage({ params, searchParams }: PagePr
         </section>
       )}
 
-      {/* Line movement chart */}
+      {/* Market movement — odds shift (primary) + line history (secondary) */}
       {lineSnapshots.length > 0 && (
-        <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
-          <h2 className="mb-4 text-lg font-semibold text-white">Line Movement</h2>
-          <LineMovementChart snapshots={lineSnapshots} openingLine={prediction.opening_line} />
-        </section>
+        <div className="space-y-4">
+          {/* Odds movement */}
+          <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+            <h2 className="mb-4 text-lg font-semibold text-white">Odds Movement</h2>
+            <OddsMovementChart snapshots={lineSnapshots} />
+          </section>
+
+          {/* Line movement — only interesting if line actually moved */}
+          <section className="rounded-xl border border-slate-700 bg-slate-800 p-5">
+            <h2 className="mb-1 text-lg font-semibold text-white">Line Movement</h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Prop line changes are rare for K props — odds movement above is the real market signal.
+            </p>
+            <LineMovementChart snapshots={lineSnapshots} openingLine={prediction.opening_line} />
+          </section>
+        </div>
       )}
 
       {/* Lineup matchup */}

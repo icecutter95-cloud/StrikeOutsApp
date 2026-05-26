@@ -43,6 +43,8 @@ export interface Prediction {
   prop_odds_over: number | null;
   prop_odds_under: number | null;
   opening_line: number | null;
+  opening_odds_over: number | null;
+  opening_odds_under: number | null;
 
   // Edge / recommendation
   edge_pct: number | null;

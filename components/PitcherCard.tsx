@@ -93,6 +93,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
               Steam {prediction.steam_direction === "up" ? "↑" : "↓"}
             </span>
           )}
+          <OddsShiftBadge prediction={prediction} />
           <DivergenceBadge prediction={prediction} />
           {prediction.game_status === "final" && (
             <FinalBadge prediction={prediction} />
@@ -175,6 +176,54 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
       }`}
     >
       {prediction.actual_ks} Ks {prediction.model_correct ? "✓" : "✗"}
+    </span>
+  );
+}
+
+function impliedProb(odds: number): number {
+  return odds > 0 ? 100 / (odds + 100) : Math.abs(odds) / (Math.abs(odds) + 100);
+}
+
+function fmtOdds(odds: number): string {
+  return odds > 0 ? `+${odds}` : String(odds);
+}
+
+function OddsShiftBadge({ prediction }: { prediction: Prediction }) {
+  const {
+    recommendation,
+    opening_odds_over,
+    opening_odds_under,
+    prop_odds_over,
+    prop_odds_under
+  } = prediction;
+
+  // Only show for active bet recommendations
+  if (!recommendation || recommendation === "NO_BET") return null;
+
+  const isOver = recommendation === "BET_OVER";
+  const openOdds = isOver ? opening_odds_over : opening_odds_under;
+  const curOdds  = isOver ? prop_odds_over   : prop_odds_under;
+
+  // Need both opening and current to compute shift
+  if (!openOdds || !curOdds || openOdds === curOdds) return null;
+
+  const shift = impliedProb(curOdds) - impliedProb(openOdds); // positive = more money on this side
+  if (Math.abs(shift) < 3) return null; // < 3% implied prob shift — not worth showing
+
+  // Market confirming your recommendation? Green. Fading it? Amber.
+  const confirms = shift > 0;
+  const colorClass = confirms
+    ? "bg-green-900/40 text-green-400"
+    : "bg-amber-900/40 text-amber-400";
+
+  const sideLabel = isOver ? "O" : "U";
+
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${colorClass}`}
+      title={`${isOver ? "Over" : "Under"} odds at open vs now. ${confirms ? "Market agrees with recommendation." : "Market fading recommendation."}`}
+    >
+      {sideLabel}: {fmtOdds(openOdds)}→{fmtOdds(curOdds)}
     </span>
   );
 }
