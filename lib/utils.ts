@@ -170,10 +170,24 @@ export function isActiveBet(
 // ============================================================
 
 /**
- * Format a Date object to YYYY-MM-DD string.
+ * Format a Date object to YYYY-MM-DD string (UTC).
  */
 export function toDateString(date: Date): string {
   return date.toISOString().split("T")[0];
+}
+
+/**
+ * The current MLB "slate date" — today in US Eastern time.
+ *
+ * Vercel crons fire on UTC, so any job running after 8 PM ET sees a UTC date
+ * that has already rolled over to tomorrow. That silently pointed the 2 AM UTC
+ * refresh (10 PM ET) at an empty slate and made the late-evening fetch-odds runs
+ * poll tomorrow's games while tonight's were still live. Baseball's day is
+ * Eastern, so schedule-facing code should be too.
+ */
+export function toEasternDateString(date: Date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD, and timeZone handles DST automatically.
+  return date.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
 /**

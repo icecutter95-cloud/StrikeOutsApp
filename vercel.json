@@ -1,9 +1,10 @@
 {
   "framework": "nextjs",
+  "_comment": "Vercel cron schedules are UTC. ET equivalents are noted per entry; all route handlers resolve the slate date with toEasternDateString() so the two never disagree.",
   "crons": [
-    { "path": "/api/cron/fetch-odds",          "schedule": "0 * * * *"    },
-    { "path": "/api/cron/fetch-starters",      "schedule": "0 8 * * *"    },
-    { "path": "/api/cron/refresh-projections", "schedule": "0 22,2 * * *" },
-    { "path": "/api/cron/close-games",         "schedule": "0 9 * * *"    }
+    { "path": "/api/cron/fetch-odds",          "schedule": "0 * * * *"       },
+    { "path": "/api/cron/fetch-starters",      "schedule": "0 8 * * *"       },
+    { "path": "/api/cron/refresh-projections", "schedule": "0 15,22,2 * * *" },
+    { "path": "/api/cron/close-games",         "schedule": "0 9 * * *"       }
   ]
 }

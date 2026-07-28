@@ -7,14 +7,14 @@ import { getMLBPitcherKProps, matchPropToPitcher } from "@/lib/data/odds-api";
 import { getWeatherModifier } from "@/lib/data/weather";
 import { generateProjection } from "@/lib/projection";
 import type { PitcherStats, ModelConfig } from "@/lib/types";
-import { toDateString } from "@/lib/utils";
+import { toEasternDateString } from "@/lib/utils";
 
 export const maxDuration = 60; // Vercel max for hobby; upgrade to Pro for longer
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as { date?: string };
-    const date = body.date ?? toDateString(new Date());
+    const date = body.date ?? toEasternDateString();
 
     const supabase = await createServiceClient();
 

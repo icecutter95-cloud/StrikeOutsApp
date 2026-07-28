@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getGameResult } from "@/lib/data/mlb-stats";
 import { computeCLV, determineModelCorrect, determineBetResult } from "@/lib/projection";
-import { toDateString } from "@/lib/utils";
+import { toEasternDateString } from "@/lib/utils";
 import type { Prediction } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const today = toDateString(new Date());
+    const today = toEasternDateString();
     const supabase = await createServiceClient();
 
     // Fetch all predictions that are not yet final and from before today

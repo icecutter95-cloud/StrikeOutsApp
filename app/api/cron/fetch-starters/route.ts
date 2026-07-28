@@ -5,7 +5,7 @@ import { getPitcherSeasonStats, getPitcherRecentVelocity, getPitcherPlatoonSplit
 import { getPitcherFanGraphsStats } from "@/lib/data/fangraphs";
 import { generateProjection } from "@/lib/projection";
 import { getWeatherModifier } from "@/lib/data/weather";
-import { toDateString } from "@/lib/utils";
+import { toEasternDateString } from "@/lib/utils";
 import type { ModelConfig, PitcherStats } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const date = toDateString(new Date());
+    const date = toEasternDateString();
     const supabase = await createServiceClient();
 
     // Fetch model config

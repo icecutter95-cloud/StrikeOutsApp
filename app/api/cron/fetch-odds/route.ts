@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getMLBPitcherKProps, matchPropToPitcher } from "@/lib/data/odds-api";
-import { toDateString } from "@/lib/utils";
+import { toEasternDateString } from "@/lib/utils";
 import type { Prediction } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const date = toDateString(new Date());
+    // Eastern, not UTC — the 8 PM-midnight ET runs would otherwise poll
+    // tomorrow's slate while tonight's games are still live.
+    const date = toEasternDateString();
     const supabase = await createServiceClient();
 
     // Fetch open predictions for today where the game hasn't started yet

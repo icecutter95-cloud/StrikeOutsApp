@@ -60,6 +60,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // Summary stats
   const totalGames = allPredictions.length;
   const betsRecommended = allPredictions.filter(isActiveBet).length;
+  const confirmedLineups = allPredictions.filter(
+    (p) => p.lineup_confirmation_status === "confirmed"
+  ).length;
   const topEdge =
     allPredictions.length > 0 ? getActiveEdge(allPredictions[0]) : null;
 
@@ -90,6 +93,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           highlight={topEdge !== null && topEdge > 0.04}
         />
       </div>
+
+      {/* Lineup outage warning.
+          A 12-day lineup failure (2026-06-30 → 07-11) went unnoticed because the
+          slate kept generating normally — projections just silently fell back to a
+          neutral lineup multiplier. Surface it where it can't be missed. */}
+      {totalGames >= 5 && confirmedLineups === 0 && (
+        <div className="rounded-lg border border-amber-600 bg-amber-900/25 p-4 text-amber-200">
+          <p className="font-medium">⚠️ No confirmed lineups on this slate</p>
+          <p className="mt-1 text-sm text-amber-300/90">
+            All {totalGames} games are running on a neutral lineup multiplier, so
+            projections are weaker than usual. Lineups normally confirm by late
+            afternoon — if this persists, the lineup fetch has failed. Hit Refresh
+            Projections once lineups are posted.
+          </p>
+        </div>
+      )}
 
       {/* Error state */}
       {error && (
