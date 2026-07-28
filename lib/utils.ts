@@ -157,6 +157,30 @@ export function getActiveUnits(
   return p.recommended_units;
 }
 
+/**
+ * Gap in Ks between the raw projection and the prop line, measured toward the
+ * recommended side. This is v2's primary gate (>= 1.5) and the strongest single
+ * filter in the season backtest, so it's also useful as a dashboard sort key.
+ *
+ * With no live bet there's no side to measure toward, so fall back to the
+ * absolute distance. Returns null when either input is missing.
+ */
+export function getProjectionMargin(
+  p: Pick<
+    Prediction,
+    "projected_ks" | "prop_line" | "recommendation" | "adjusted_recommendation"
+  >
+): number | null {
+  if (p.projected_ks === null || p.prop_line === null) return null;
+  const proj = Number(p.projected_ks);
+  const line = Number(p.prop_line);
+  const rec = getActiveRecommendation(p);
+
+  if (rec === "BET_UNDER") return line - proj;
+  if (rec === "BET_OVER") return proj - line;
+  return Math.abs(proj - line);
+}
+
 /** True when the live recommendation is an actual bet. */
 export function isActiveBet(
   p: Pick<Prediction, "recommendation" | "adjusted_recommendation">

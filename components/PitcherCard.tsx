@@ -8,6 +8,7 @@ import {
   getActiveRecommendation,
   getActiveEdge,
   getActiveUnits,
+  getProjectionMargin,
   isActiveBet
 } from "@/lib/utils";
 
@@ -188,19 +189,8 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
  * makes the gate legible: anything below the threshold is why a play is a No Bet.
  */
 function MarginBadge({ prediction }: { prediction: Prediction }) {
-  const { projected_ks, prop_line } = prediction;
-  if (projected_ks === null || prop_line === null) return null;
-
-  const proj = Number(projected_ks);
-  const line = Number(prop_line);
-  const rec = getActiveRecommendation(prediction);
-
-  // For a live bet, measure toward the recommended side. Otherwise show the
-  // raw distance so it's clear how far off the threshold the play is.
-  const margin =
-    rec === "BET_UNDER" ? line - proj
-    : rec === "BET_OVER" ? proj - line
-    : Math.abs(proj - line);
+  const margin = getProjectionMargin(prediction);
+  if (margin === null) return null;
 
   const meets = margin >= 1.5;
   return (

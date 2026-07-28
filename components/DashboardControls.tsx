@@ -3,9 +3,18 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+type SortKey = "edge" | "margin" | "time" | "move";
+
+const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
+  { key: "edge",   label: "Edge %"    },
+  { key: "margin", label: "Margin"    },
+  { key: "time",   label: "Game Time" },
+  { key: "move",   label: "Odds Move" }
+];
+
 interface DashboardControlsProps {
   date: string;
-  sort: "edge" | "time" | "move";
+  sort: SortKey;
 }
 
 export default function DashboardControls({ date, sort }: DashboardControlsProps) {
@@ -40,7 +49,7 @@ export default function DashboardControls({ date, sort }: DashboardControlsProps
     router.push(`/?date=${newDate}&sort=${sort}`);
   };
 
-  const handleSort = (newSort: "edge" | "time" | "move") => {
+  const handleSort = (newSort: SortKey) => {
     router.push(`/?date=${date}&sort=${newSort}`);
   };
 
@@ -52,36 +61,21 @@ export default function DashboardControls({ date, sort }: DashboardControlsProps
 
       {/* Sort toggle */}
       <div className="flex rounded-lg border border-slate-600 overflow-hidden text-sm font-medium">
-        <button
-          onClick={() => handleSort("edge")}
-          className={`px-3 py-2 transition-colors ${
-            sort === "edge"
-              ? "bg-brand text-white"
-              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-          }`}
-        >
-          Edge %
-        </button>
-        <button
-          onClick={() => handleSort("time")}
-          className={`px-3 py-2 transition-colors border-l border-slate-600 ${
-            sort === "time"
-              ? "bg-brand text-white"
-              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-          }`}
-        >
-          Game Time
-        </button>
-        <button
-          onClick={() => handleSort("move")}
-          className={`px-3 py-2 transition-colors border-l border-slate-600 ${
-            sort === "move"
-              ? "bg-brand text-white"
-              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
-          }`}
-        >
-          Odds Move
-        </button>
+        {SORT_OPTIONS.map((opt, i) => (
+          <button
+            key={opt.key}
+            onClick={() => handleSort(opt.key)}
+            className={`px-3 py-2 transition-colors ${
+              i > 0 ? "border-l border-slate-600" : ""
+            } ${
+              sort === opt.key
+                ? "bg-brand text-white"
+                : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
       <input

@@ -1,5 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
-import { toDateString, formatEdge, getActiveEdge, isActiveBet } from "@/lib/utils";
+import {
+  toDateString,
+  formatEdge,
+  getActiveEdge,
+  getProjectionMargin,
+  isActiveBet
+} from "@/lib/utils";
+
+type SortKey = "edge" | "margin" | "time" | "move";
 import type { Prediction } from "@/lib/types";
 import PitcherCard from "@/components/PitcherCard";
 import DashboardControls from "@/components/DashboardControls";
@@ -28,7 +36,11 @@ function oddsMovementScore(p: Prediction): number {
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const date = searchParams.date ?? toDateString(new Date());
-  const sort = searchParams.sort === "time" ? "time" : searchParams.sort === "move" ? "move" : "edge";
+  const sort: SortKey =
+    searchParams.sort === "time"   ? "time"
+    : searchParams.sort === "move"   ? "move"
+    : searchParams.sort === "margin" ? "margin"
+    : "edge";
 
   const supabase = await createClient();
 
@@ -48,6 +60,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   if (sort === "move") {
     allPredictions = [...allPredictions].sort(
       (a, b) => oddsMovementScore(b) - oddsMovementScore(a)
+    );
+  } else if (sort === "margin") {
+    // Biggest projection-vs-line gap first — v2's primary gate.
+    allPredictions = [...allPredictions].sort(
+      (a, b) =>
+        (getProjectionMargin(b) ?? -Infinity) - (getProjectionMargin(a) ?? -Infinity)
     );
   } else if (sort === "edge") {
     // The DB ordered by v1 edge_pct; re-sort on the live (v2) edge so the
@@ -76,7 +94,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             MLB Pitcher Strikeout Props — {formatDate(date)}
           </p>
         </div>
-        <DashboardControls date={date} sort={sort as "edge" | "time" | "move"} />
+        <DashboardControls date={date} sort={sort} />
       </div>
 
       {/* Summary bar */}
