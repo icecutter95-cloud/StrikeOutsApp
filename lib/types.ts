@@ -55,6 +55,15 @@ export interface Prediction {
   recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET" | null;
   recommended_units: number | null;
 
+  // Model v2 — shrunk projection + margin/form gating.
+  // v1 fields above keep running in parallel so the two models stay comparable.
+  model_version: string;
+  adjusted_ks: number | null;
+  adjusted_edge_pct: number | null;
+  adjusted_recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET" | null;
+  adjusted_units: number | null;
+  swstr_pct: number | null;
+
   // Steam
   steam_flag: boolean;
   steam_direction: string | null;
@@ -160,6 +169,11 @@ export interface ProjectionResult {
   edge_pct: number;
   recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
   recommended_units: number;
+  adjusted_ks: number | null;
+  adjusted_edge_pct: number | null;
+  adjusted_recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
+  adjusted_units: number;
+  swstr_pct: number | null;
   projected_ip: number;
   steam_flag: boolean;
   lineup_confirmation_status: "confirmed" | "partial" | "unconfirmed";

@@ -190,12 +190,16 @@ export async function POST(req: NextRequest) {
           book_implied_under: number | null;
           recommendation: string | null;
           recommended_units: number | null;
+          adjusted_ks: number | null;
+          adjusted_edge_pct: number | null;
+          adjusted_recommendation: string | null;
+          adjusted_units: number | null;
         } | null = null;
 
         if (gameHasStarted && !matchedProp) {
           const { data: existing } = await supabase
             .from("predictions")
-            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units")
+            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units,adjusted_ks,adjusted_edge_pct,adjusted_recommendation,adjusted_units")
             .eq("pitcher_id", game.pitcher_id)
             .eq("game_date", date)
             .single();
@@ -239,6 +243,10 @@ export async function POST(req: NextRequest) {
           last3_k_rate: pitcherStats.last3_k_rate,
           season_k_pct: pitcherStats.season_k_pct,
           csw_pct: pitcherStats.csw_pct,
+          // swstr_pct is the stuff metric computeCSWK9() actually uses — Savant
+          // never populates csw_pct, which is why predictions.csw_pct was NULL on
+          // all 1,999 historical rows and DivergenceBadge could never fire.
+          swstr_pct: pitcherStats.swstr_pct,
           xfip_k_rate: pitcherStats.xfip,
           model_weights: {
             last3: config.weight_last3,
@@ -260,6 +268,12 @@ export async function POST(req: NextRequest) {
           book_implied_under: existingOdds && !matchedProp ? existingOdds.book_implied_under : projection.book_implied_under,
           recommendation: existingOdds && !matchedProp ? existingOdds.recommendation : projection.recommendation,
           recommended_units: existingOdds && !matchedProp ? existingOdds.recommended_units : projection.recommended_units,
+          // v2 outputs — only overwritten while the line is still live, same as v1
+          model_version: "v2",
+          adjusted_ks: existingOdds && !matchedProp ? existingOdds.adjusted_ks : projection.adjusted_ks,
+          adjusted_edge_pct: existingOdds && !matchedProp ? existingOdds.adjusted_edge_pct : projection.adjusted_edge_pct,
+          adjusted_recommendation: existingOdds && !matchedProp ? existingOdds.adjusted_recommendation : projection.adjusted_recommendation,
+          adjusted_units: existingOdds && !matchedProp ? existingOdds.adjusted_units : projection.adjusted_units,
           projected_ip: projection.projected_ip,
           park_factor: projection.park_factor,
           weather_modifier: projection.weather_modifier,

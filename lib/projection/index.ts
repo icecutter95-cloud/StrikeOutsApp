@@ -32,6 +32,44 @@ const MIN_IP = 3.0;
 // for overs eliminates the negative-EV middle tiers without touching the model.
 const OVER_EDGE_PREMIUM = 0.08;
 
+// ============================================================
+// Model v2 calibration constants
+// ============================================================
+// Full-season analysis (1,999 decided bets, 2026-07-28) found the projection
+// is roughly 4x overconfident relative to the market:
+//
+//   regr_slope(actual - line, projected - line) = 0.246
+//   MAE(projected_ks) = 1.923  vs  MAE(prop_line) = 1.817
+//
+// i.e. the prop line alone predicted better than the model, and the model's
+// deviation from the line carried only ~25% real signal. The bias was directional:
+// every BET_OVER slice averaged actual BELOW projection, every BET_UNDER slice
+// averaged actual ABOVE it — the model fired exactly where it was wrong.
+//
+// Shrinking the projection toward the line by this factor minimised MAE (1.791).
+const SHRINK_LAMBDA = 0.25;
+
+// Minimum gap between the RAW projection and the line before a bet may fire.
+// Margin was the single strongest filter found: bets under 0.5 Ks of margin went
+// 41-43% (615 bets, ~-84 units) while margin >= 1.5 returned +12.9% ROI. Against
+// a ~1.9 MAE, a sub-1.5 K disagreement with the market is indistinguishable from noise.
+const MIN_MARGIN_KS = 1.5;
+
+// Recent-form guards. fr = last3_k_rate / season_k_pct.
+// Betting UNDER on a pitcher whose last 3 starts run hot went 41.5% / -24.4% ROI
+// over 193 bets; betting OVER on a cold pitcher went 43.4% / -19.2% over 159.
+const FORM_HOT_RATIO = 1.62; // above this, block unders
+const FORM_COLD_RATIO = 1.18; // below this, block overs
+
+// Edge thresholds are re-based for shrunk edges (roughly 1/4 the old scale).
+const V2_OVER_EDGE_PREMIUM = OVER_EDGE_PREMIUM * SHRINK_LAMBDA; // 0.02
+const V2_MIN_EDGE = 0.005;
+
+// Flat staking. Within the gated set, ROI showed no monotonic relationship to
+// adjusted edge (2-4% edge returned +29.2%, 8%+ returned +17.3%), so there is no
+// evidence supporting a larger stake at higher edge. Bet the same size or don't bet.
+const V2_FLAT_UNITS = 1.0;
+
 // CSW calibration: CSW% of ~28% ≈ 7 K/9 historically
 // Linear: K/9 ≈ CSW% * 25 (empirical)
 const CSW_CALIBRATION = 25;
@@ -279,6 +317,21 @@ export async function generateProjection(
     }
   }
 
+  // ----------------------------------------------------------
+  // Step 9: Model v2 — shrunk projection + margin/form gating
+  // ----------------------------------------------------------
+  // v1 outputs above are left untouched so the original series keeps running
+  // in parallel and the two models stay comparable. v2 is what should be bet.
+  const v2 = computeV2(
+    Math.max(0, adjustedProjectedKs),
+    propLine,
+    propOddsOver,
+    propOddsUnder,
+    pitcherStats,
+    lineupStatus,
+    config
+  );
+
   return {
     projected_ks: Math.max(0, adjustedProjectedKs),
     confidence_low: Math.max(0, confidenceLow),
@@ -288,6 +341,11 @@ export async function generateProjection(
     edge_pct: edgePct,
     recommendation,
     recommended_units: recommendedUnits,
+    adjusted_ks: v2.adjustedKs,
+    adjusted_edge_pct: v2.adjustedEdgePct,
+    adjusted_recommendation: v2.adjustedRecommendation,
+    adjusted_units: v2.adjustedUnits,
+    swstr_pct: pitcherStats.swstr_pct,
     projected_ip: projectedIp,
     steam_flag: false, // Set by cron job after monitoring
     lineup_confirmation_status: lineupStatus,
@@ -296,6 +354,117 @@ export async function generateProjection(
     weather_modifier: finalWeatherModifier,
     book_implied_over: bookImpliedOver,
     book_implied_under: bookImpliedUnder
+  };
+}
+
+// ============================================================
+// Model v2
+// ============================================================
+
+interface V2Result {
+  adjustedKs: number | null;
+  adjustedEdgePct: number | null;
+  adjustedRecommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
+  adjustedUnits: number;
+}
+
+/**
+ * Recent-form ratio: how hot the pitcher's last 3 starts run relative to his
+ * season rate. Returns null when either input is missing (treated as "no signal",
+ * which passes the guard rather than blocking the bet).
+ */
+function computeFormRatio(stats: PitcherStats): number | null {
+  const { last3_k_rate, season_k_pct } = stats;
+  if (last3_k_rate === null || season_k_pct === null || season_k_pct === 0) return null;
+  return last3_k_rate / season_k_pct;
+}
+
+/**
+ * v2 recommendation: shrink the projection toward the prop line, recompute the
+ * edge off that shrunk lambda, then gate on projection margin and recent form.
+ *
+ * Backtested over the full 2026 season (see 003_model_v2.sql): 248 bets,
+ * 63.7%, +40.0 units, +16.1% ROI — against v1's 1,999 bets at -4.8% ROI.
+ * Positive independently in April (+15.1%), May (+19.4%) and June (+9.0%).
+ */
+function computeV2(
+  rawProjectedKs: number,
+  propLine: number | null,
+  propOddsOver: number | null,
+  propOddsUnder: number | null,
+  stats: PitcherStats,
+  lineupStatus: "confirmed" | "partial" | "unconfirmed",
+  config: ModelConfig
+): V2Result {
+  const noBet: V2Result = {
+    adjustedKs: null,
+    adjustedEdgePct: null,
+    adjustedRecommendation: "NO_BET",
+    adjustedUnits: 0
+  };
+
+  if (propLine === null || propOddsOver === null || propOddsUnder === null) {
+    return noBet;
+  }
+
+  // Shrink toward the line — the core v2 correction.
+  const adjustedKs = Math.max(
+    0.05,
+    propLine + SHRINK_LAMBDA * (rawProjectedKs - propLine)
+  );
+
+  const probOver = poissonProbOver(propLine, adjustedKs);
+  const probUnder = 1 - probOver;
+
+  const fair = devig(propOddsOver, propOddsUnder);
+
+  // Lineup penalty is scaled to the shrunk edge scale so it stays proportionate.
+  const penalty =
+    lineupStatus === "unconfirmed"
+      ? config.unconfirmed_lineup_penalty * SHRINK_LAMBDA
+      : 0;
+
+  const edgeOver = probOver - fair.over - penalty;
+  const edgeUnder = probUnder - fair.under - penalty;
+
+  let side: "BET_OVER" | "BET_UNDER" | "NO_BET";
+  let edge: number;
+
+  if (edgeOver > edgeUnder + V2_OVER_EDGE_PREMIUM && edgeOver > V2_MIN_EDGE) {
+    side = "BET_OVER";
+    edge = edgeOver;
+  } else if (edgeUnder > edgeOver && edgeUnder > V2_MIN_EDGE) {
+    side = "BET_UNDER";
+    edge = edgeUnder;
+  } else {
+    return { ...noBet, adjustedKs, adjustedEdgePct: Math.max(edgeOver, edgeUnder) };
+  }
+
+  // --- Gate 1: margin, measured on the RAW projection ---
+  // The raw disagreement with the market is what carries the signal; the shrunk
+  // value is only for pricing. A sub-1.5 K gap is noise against a ~1.9 MAE.
+  const margin =
+    side === "BET_UNDER" ? propLine - rawProjectedKs : rawProjectedKs - propLine;
+  if (margin < MIN_MARGIN_KS) {
+    return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+  }
+
+  // --- Gate 2: recent form ---
+  const formRatio = computeFormRatio(stats);
+  if (formRatio !== null) {
+    if (side === "BET_UNDER" && formRatio > FORM_HOT_RATIO) {
+      return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+    }
+    if (side === "BET_OVER" && formRatio < FORM_COLD_RATIO) {
+      return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+    }
+  }
+
+  return {
+    adjustedKs,
+    adjustedEdgePct: edge,
+    adjustedRecommendation: side,
+    adjustedUnits: V2_FLAT_UNITS
   };
 }
 

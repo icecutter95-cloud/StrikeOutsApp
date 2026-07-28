@@ -1,4 +1,4 @@
-import type { ModelConfig } from "@/lib/types";
+import type { ModelConfig, Prediction } from "@/lib/types";
 
 // ============================================================
 // Odds helpers
@@ -124,6 +124,45 @@ export function getBetUnits(edgePct: number, config: ModelConfig): number {
   if (edgePct >= config.edge_tier2_min) return config.edge_tier2_units;
   if (edgePct >= config.edge_tier1_min) return config.edge_tier1_units;
   return 0;
+}
+
+// ============================================================
+// Model version helpers
+// ============================================================
+
+/**
+ * A prediction's live recommendation.
+ *
+ * v2 (shrunk projection + margin/form gating) is what should be bet, but the v1
+ * fields keep being written in parallel so the two models stay comparable. Rows
+ * predating the v2 migration have no adjusted_* values and fall back to v1.
+ */
+export function getActiveRecommendation(
+  p: Pick<Prediction, "recommendation" | "adjusted_recommendation">
+): "BET_OVER" | "BET_UNDER" | "NO_BET" | null {
+  return p.adjusted_recommendation ?? p.recommendation;
+}
+
+export function getActiveEdge(
+  p: Pick<Prediction, "edge_pct" | "adjusted_edge_pct" | "adjusted_recommendation">
+): number | null {
+  if (p.adjusted_recommendation !== null) return p.adjusted_edge_pct;
+  return p.edge_pct;
+}
+
+export function getActiveUnits(
+  p: Pick<Prediction, "recommended_units" | "adjusted_units" | "adjusted_recommendation">
+): number | null {
+  if (p.adjusted_recommendation !== null) return p.adjusted_units;
+  return p.recommended_units;
+}
+
+/** True when the live recommendation is an actual bet. */
+export function isActiveBet(
+  p: Pick<Prediction, "recommendation" | "adjusted_recommendation">
+): boolean {
+  const rec = getActiveRecommendation(p);
+  return rec !== null && rec !== "NO_BET";
 }
 
 // ============================================================

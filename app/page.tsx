@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { toDateString, formatEdge } from "@/lib/utils";
+import { toDateString, formatEdge, getActiveEdge, isActiveBet } from "@/lib/utils";
 import type { Prediction } from "@/lib/types";
 import PitcherCard from "@/components/PitcherCard";
 import DashboardControls from "@/components/DashboardControls";
@@ -49,17 +49,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     allPredictions = [...allPredictions].sort(
       (a, b) => oddsMovementScore(b) - oddsMovementScore(a)
     );
+  } else if (sort === "edge") {
+    // The DB ordered by v1 edge_pct; re-sort on the live (v2) edge so the
+    // ranking matches what the cards actually display.
+    allPredictions = [...allPredictions].sort(
+      (a, b) => (getActiveEdge(b) ?? -Infinity) - (getActiveEdge(a) ?? -Infinity)
+    );
   }
 
   // Summary stats
   const totalGames = allPredictions.length;
-  const betsRecommended = allPredictions.filter(
-    (p) => p.recommendation !== "NO_BET" && p.recommendation !== null
-  ).length;
+  const betsRecommended = allPredictions.filter(isActiveBet).length;
   const topEdge =
-    allPredictions.length > 0 && allPredictions[0].edge_pct !== null
-      ? allPredictions[0].edge_pct
-      : null;
+    allPredictions.length > 0 ? getActiveEdge(allPredictions[0]) : null;
 
   return (
     <div className="space-y-6">

@@ -15,6 +15,7 @@ interface PageProps {
     bet_placed?: string;
     k_line?: string;      // prop line e.g. "4.5"
     recommendation?: string; // "BET_OVER" | "BET_UNDER"
+    model?: string;       // "v1" | "v2" — which model's recommendations to score
   };
 }
 
@@ -26,15 +27,33 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
   const supabase = await createClient();
 
-  // Edge tier definitions — declared early so query filtering can reference them
-  const edgeTiers = [
-    { label: "4–6.9%",   min: 0.04, max: 0.07 },
-    { label: "7–9.9%",   min: 0.07, max: 0.10 },
-    { label: "10–14.9%", min: 0.10, max: 0.15 },
-    { label: "15–19.9%", min: 0.15, max: 0.20 },
-    { label: "20–29.9%", min: 0.20, max: 0.30 },
-    { label: "30%+",     min: 0.30, max: 1.0  },
-  ];
+  // Which model's output is being scored. v2 (shrunk projection + margin/form
+  // gating) is the live model and the default; v1 stays queryable so the original
+  // series remains interpretable rather than being silently averaged in.
+  const modelView = searchParams.model === "v1" ? "v1" : "v2";
+  const isV2 = modelView === "v2";
+  const recField  = isV2 ? "adjusted_recommendation" : "recommendation";
+  const edgeField = isV2 ? "adjusted_edge_pct" : "edge_pct";
+
+  // v2 edges are ~1/4 the v1 scale (the projection is shrunk 75% toward the
+  // line), so the tier boundaries have to be re-based or every bet lands in
+  // the bottom bucket.
+  const edgeTiers = isV2
+    ? [
+        { label: "<2%",     min: -1.0, max: 0.02 },
+        { label: "2–3.9%",  min: 0.02, max: 0.04 },
+        { label: "4–5.9%",  min: 0.04, max: 0.06 },
+        { label: "6–7.9%",  min: 0.06, max: 0.08 },
+        { label: "8%+",     min: 0.08, max: 1.0  },
+      ]
+    : [
+        { label: "4–6.9%",   min: 0.04, max: 0.07 },
+        { label: "7–9.9%",   min: 0.07, max: 0.10 },
+        { label: "10–14.9%", min: 0.10, max: 0.15 },
+        { label: "15–19.9%", min: 0.15, max: 0.20 },
+        { label: "20–29.9%", min: 0.20, max: 0.30 },
+        { label: "30%+",     min: 0.30, max: 1.0  },
+      ];
 
   const activeTierMin = searchParams.edge_tier
     ? parseFloat(searchParams.edge_tier)
@@ -57,7 +76,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   if (activeTierMin !== null) {
     const activeTier = edgeTiers.find((t) => t.min === activeTierMin);
     if (activeTier) {
-      query = query.gte("edge_pct", activeTier.min).lt("edge_pct", activeTier.max);
+      query = query.gte(edgeField, activeTier.min).lt(edgeField, activeTier.max);
     }
   }
   if (searchParams.lineup_status) {
@@ -70,7 +89,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
     query = query.eq("prop_line", parseFloat(searchParams.k_line));
   }
   if (searchParams.recommendation) {
-    query = query.eq("recommendation", searchParams.recommendation);
+    query = query.eq(recField, searchParams.recommendation);
   }
 
   const { data, count, error } = await query;
@@ -86,7 +105,11 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   function buildStatsQuery(from: number) {
     let q = supabase
       .from("predictions")
-      .select("edge_pct,recommendation,model_correct,bet_result,user_bet_units,projected_ks,actual_ks,game_date")
+      .select(
+        "edge_pct,recommendation,adjusted_edge_pct,adjusted_recommendation," +
+        "model_correct,bet_result,user_bet_units,projected_ks,adjusted_ks," +
+        "actual_ks,prop_line,game_date"
+      )
       .eq("game_status", "final")
       .range(from, from + STATS_BATCH - 1);
 
@@ -95,7 +118,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
     if (searchParams.lineup_status) q = q.eq("lineup_confirmation_status", searchParams.lineup_status);
     if (searchParams.bet_placed === "true") q = q.eq("user_bet_placed", true);
     if (searchParams.k_line)        q = q.eq("prop_line", parseFloat(searchParams.k_line));
-    if (searchParams.recommendation) q = q.eq("recommendation", searchParams.recommendation);
+    if (searchParams.recommendation) q = q.eq(recField, searchParams.recommendation);
 
     return q;
   }
@@ -121,32 +144,54 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   if (searchParams.bet_placed === "true") activeFilterLabels.push("bet placed");
   const filterLabel = activeFilterLabels.length > 0 ? activeFilterLabels.join(" · ") : null;
 
+  // ----------------------------------------------------------
+  // Model-version accessors
+  // ----------------------------------------------------------
+  // Scoring v2 can't reuse the stored model_correct column — that's tied to the
+  // v1 recommendation. Deriving the result from actual_ks vs prop_line works for
+  // both, and reproduces model_correct exactly on v1 rows.
+  function recOf(p: Partial<Prediction>) {
+    return isV2 ? p.adjusted_recommendation : p.recommendation;
+  }
+  function edgeOf(p: Partial<Prediction>): number | null {
+    const e = isV2 ? p.adjusted_edge_pct : p.edge_pct;
+    return e === null || e === undefined ? null : Number(e);
+  }
+  function correctOf(p: Partial<Prediction>): boolean | null {
+    const rec = recOf(p);
+    if (!rec || rec === "NO_BET") return null;
+    if (p.actual_ks === null || p.actual_ks === undefined) return null;
+    if (p.prop_line === null || p.prop_line === undefined) return null;
+    return rec === "BET_OVER"
+      ? Number(p.actual_ks) > Number(p.prop_line)
+      : Number(p.actual_ks) < Number(p.prop_line);
+  }
+
   // Helper: compute W-L record for a slice of predictions
   function sliceRecord(preds: Partial<Prediction>[], n: number) {
     // preds already sorted date-desc from the query; take first n decided bets
-    const decided = preds.filter((p) => p.model_correct !== null).slice(0, n);
+    const decided = preds.filter((p) => correctOf(p) !== null).slice(0, n);
     return {
-      wins: decided.filter((p) => p.model_correct === true).length,
-      losses: decided.filter((p) => p.model_correct === false).length,
+      wins: decided.filter((p) => correctOf(p) === true).length,
+      losses: decided.filter((p) => correctOf(p) === false).length,
       count: decided.length
     };
   }
 
   // Stats by edge tier
   const tierStats = edgeTiers.map((tier) => {
-    const tiered = allPredictions.filter(
-      (p) =>
-        p.edge_pct !== null &&
-        p.edge_pct !== undefined &&
-        p.edge_pct >= tier.min &&
-        p.edge_pct < tier.max &&
-        p.recommendation !== "NO_BET"
-    );
+    const tiered = allPredictions.filter((p) => {
+      const e = edgeOf(p);
+      const rec = recOf(p);
+      return (
+        e !== null && e >= tier.min && e < tier.max && !!rec && rec !== "NO_BET"
+      );
+    });
 
-    const withResult = tiered.filter((p) => p.model_correct !== null);
-    const correct = withResult.filter((p) => p.model_correct).length;
-    const wins = tiered.filter((p) => p.model_correct === true).length;
-    const losses = tiered.filter((p) => p.model_correct === false).length;
+    const withResult = tiered.filter((p) => correctOf(p) !== null);
+    const correct = withResult.filter((p) => correctOf(p)).length;
+    const wins = tiered.filter((p) => correctOf(p) === true).length;
+    const losses = tiered.filter((p) => correctOf(p) === false).length;
     const units = tiered
       .filter((p) => p.bet_result)
       .reduce((sum, p) => {
@@ -178,29 +223,57 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   });
 
   // Overall model accuracy
-  const withResult = allPredictions.filter(
-    (p) => p.model_correct !== null && p.recommendation !== "NO_BET"
-  );
+  const withResult = allPredictions.filter((p) => correctOf(p) !== null);
   const overallAccuracy =
     withResult.length > 0
-      ? (withResult.filter((p) => p.model_correct).length / withResult.length) * 100
+      ? (withResult.filter((p) => correctOf(p)).length / withResult.length) * 100
       : null;
 
-  const withKs = allPredictions.filter(
-    (p) => p.projected_ks !== null && p.actual_ks !== null && p.recommendation !== "NO_BET"
-  );
+  // Projection error is measured against whichever lambda that model actually
+  // prices off: raw projected_ks for v1, the shrunk adjusted_ks for v2.
+  const withKs = allPredictions.filter((p) => {
+    const rec = recOf(p);
+    const proj = isV2 ? p.adjusted_ks : p.projected_ks;
+    return (
+      proj !== null && proj !== undefined &&
+      p.actual_ks !== null && p.actual_ks !== undefined &&
+      !!rec && rec !== "NO_BET"
+    );
+  });
   const mae = withKs.length > 0
-    ? withKs.reduce((sum, p) => sum + Math.abs((p.projected_ks ?? 0) - (p.actual_ks ?? 0)), 0) / withKs.length
+    ? withKs.reduce((sum, p) => {
+        const proj = Number(isV2 ? p.adjusted_ks : p.projected_ks);
+        return sum + Math.abs(proj - Number(p.actual_ks));
+      }, 0) / withKs.length
     : null;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">History</h1>
-        <p className="text-sm text-slate-400">
-          All finalized predictions · {totalCount} total records
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">History</h1>
+          <p className="text-sm text-slate-400">
+            All finalized predictions · {totalCount} total records
+          </p>
+        </div>
+        <ModelVersionToggle searchParams={searchParams} modelView={modelView} />
       </div>
+
+      <p className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-xs text-slate-400">
+        {isV2 ? (
+          <>
+            <span className="font-semibold text-violet-300">v2</span> — projection shrunk
+            75% toward the prop line, then gated on margin (≥1.5 Ks) and recent form.
+            Backfilled across the full season, so these are the bets v2 would have made.
+          </>
+        ) : (
+          <>
+            <span className="font-semibold text-slate-300">v1</span> — the original raw
+            projection with no shrinkage or gating. Kept for comparison; still written
+            in parallel on every new prediction.
+          </>
+        )}
+      </p>
 
       {/* Overall accuracy */}
       {overallAccuracy !== null && (
@@ -303,6 +376,48 @@ function buildPageUrl(
   return `/history?${p.toString()}`;
 }
 
+function ModelVersionToggle({
+  searchParams,
+  modelView
+}: {
+  searchParams: Record<string, string | undefined>;
+  modelView: string;
+}) {
+  function urlFor(version: string) {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(searchParams)) {
+      // Edge tiers differ per model, so a tier selected under one version is
+      // meaningless under the other — drop it when switching.
+      if (v && k !== "model" && k !== "page" && k !== "edge_tier") p.set(k, v);
+    }
+    p.set("model", version);
+    return `/history?${p.toString()}`;
+  }
+
+  const options = [
+    { key: "v2", label: "v2 (live)" },
+    { key: "v1", label: "v1 (raw)" }
+  ];
+
+  return (
+    <div className="flex overflow-hidden rounded-lg border border-slate-600">
+      {options.map((o) => (
+        <a
+          key={o.key}
+          href={urlFor(o.key)}
+          className={`px-3 py-1.5 text-sm font-medium ${
+            modelView === o.key
+              ? "bg-brand text-white"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+          }`}
+        >
+          {o.label}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function HistoryFilters({
   searchParams
 }: {
@@ -310,6 +425,10 @@ function HistoryFilters({
 }) {
   return (
     <form method="GET" action="/history" className="flex flex-wrap gap-3">
+      {/* Preserve the selected model across filter submissions */}
+      {searchParams.model && (
+        <input type="hidden" name="model" value={searchParams.model} />
+      )}
       <input
         type="date"
         name="date_from"

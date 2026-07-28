@@ -4,7 +4,11 @@ import {
   formatOdds,
   formatEdge,
   formatGameTime,
-  getRecommendationColor
+  getRecommendationColor,
+  getActiveRecommendation,
+  getActiveEdge,
+  getActiveUnits,
+  isActiveBet
 } from "@/lib/utils";
 
 interface PitcherCardProps {
@@ -13,8 +17,11 @@ interface PitcherCardProps {
 }
 
 export default function PitcherCard({ prediction, date }: PitcherCardProps) {
-  const recColor = getRecommendationColor(prediction.recommendation ?? "NO_BET");
-  const isBet = prediction.recommendation && prediction.recommendation !== "NO_BET";
+  const activeRec = getActiveRecommendation(prediction);
+  const activeEdge = getActiveEdge(prediction);
+  const activeUnits = getActiveUnits(prediction);
+  const recColor = getRecommendationColor(activeRec ?? "NO_BET");
+  const isBet = isActiveBet(prediction);
 
   return (
     <Link
@@ -34,7 +41,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
               {prediction.team} vs {prediction.opponent}
             </p>
           </div>
-          <RecommendationBadge rec={prediction.recommendation} />
+          <RecommendationBadge rec={activeRec} />
         </div>
 
         {/* Game time + venue */}
@@ -77,17 +84,16 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
           <div className="flex items-center gap-1">
             <span className="text-xs text-slate-400">Edge:</span>
             <span className={`text-sm font-semibold ${recColor}`}>
-              {prediction.edge_pct !== null ? formatEdge(prediction.edge_pct) : "—"}
+              {activeEdge !== null ? formatEdge(activeEdge) : "—"}
             </span>
           </div>
-          {isBet && prediction.recommended_units !== null && (
-            <UnitBadge units={prediction.recommended_units} />
-          )}
+          {isBet && activeUnits !== null && <UnitBadge units={activeUnits} />}
         </div>
 
         {/* Status flags */}
         <div className="mt-3 flex flex-wrap gap-1.5">
           <LineupBadge status={prediction.lineup_confirmation_status} />
+          <MarginBadge prediction={prediction} />
           <LineMoveBadge prediction={prediction} />
           <OddsShiftBadge prediction={prediction} />
           <DivergenceBadge prediction={prediction} />
@@ -176,6 +182,39 @@ function FinalBadge({ prediction }: { prediction: Prediction }) {
   );
 }
 
+/**
+ * Gap between the raw projection and the prop line — the strongest single filter
+ * in the season backtest. v2 requires >= 1.5 Ks before a bet fires, so showing it
+ * makes the gate legible: anything below the threshold is why a play is a No Bet.
+ */
+function MarginBadge({ prediction }: { prediction: Prediction }) {
+  const { projected_ks, prop_line } = prediction;
+  if (projected_ks === null || prop_line === null) return null;
+
+  const proj = Number(projected_ks);
+  const line = Number(prop_line);
+  const rec = getActiveRecommendation(prediction);
+
+  // For a live bet, measure toward the recommended side. Otherwise show the
+  // raw distance so it's clear how far off the threshold the play is.
+  const margin =
+    rec === "BET_UNDER" ? line - proj
+    : rec === "BET_OVER" ? proj - line
+    : Math.abs(proj - line);
+
+  const meets = margin >= 1.5;
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+        meets ? "bg-violet-900/40 text-violet-300" : "bg-slate-700 text-slate-400"
+      }`}
+      title={`Projection is ${Math.abs(margin).toFixed(1)} Ks from the line. v2 requires 1.5+ to bet.`}
+    >
+      Margin {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K{meets ? " ✓" : ""}
+    </span>
+  );
+}
+
 function LineMoveBadge({ prediction }: { prediction: Prediction }) {
   const { opening_line, prop_line, steam_flag, steam_direction } = prediction;
 
@@ -221,12 +260,12 @@ function fmtOdds(odds: number): string {
 
 function OddsShiftBadge({ prediction }: { prediction: Prediction }) {
   const {
-    recommendation,
     opening_odds_over,
     opening_odds_under,
     prop_odds_over,
     prop_odds_under
   } = prediction;
+  const recommendation = getActiveRecommendation(prediction);
 
   // Only show for active bet recommendations
   if (!recommendation || recommendation === "NO_BET") return null;
@@ -265,15 +304,25 @@ function computeStuffDivergence(prediction: Prediction): {
   type: "regression" | "upside" | null;
   pct: number;
 } {
-  const { last3_k_rate, csw_pct } = prediction;
-  if (last3_k_rate === null || csw_pct === null) return { type: null, pct: 0 };
+  const { last3_k_rate, swstr_pct, csw_pct } = prediction;
+  if (last3_k_rate === null) return { type: null, pct: 0 };
+
+  // Prefer SwStr% — it's the metric computeCSWK9() actually uses, and the only
+  // one Savant populates. csw_pct remains as a fallback but is NULL in practice.
+  // Calibrations mirror lib/projection: SwStr% * 81, CSW% * 25.
+  let stuffK9: number;
+  if (swstr_pct !== null) {
+    stuffK9 = (swstr_pct > 1 ? swstr_pct / 100 : swstr_pct) * 81;
+  } else if (csw_pct !== null) {
+    stuffK9 = (csw_pct > 1 ? csw_pct / 100 : csw_pct) * 25;
+  } else {
+    return { type: null, pct: 0 };
+  }
 
   const last3K9 = last3_k_rate <= 1 ? last3_k_rate * 27 : last3_k_rate;
-  const cswNorm = csw_pct > 1 ? csw_pct / 100 : csw_pct;
-  const cswK9 = cswNorm * 25;
 
-  if (cswK9 === 0) return { type: null, pct: 0 };
-  const divergence = (last3K9 - cswK9) / cswK9;
+  if (stuffK9 === 0) return { type: null, pct: 0 };
+  const divergence = (last3K9 - stuffK9) / stuffK9;
 
   if (divergence > 0.3) return { type: "regression", pct: divergence };
   if (divergence < -0.3) return { type: "upside", pct: divergence };
