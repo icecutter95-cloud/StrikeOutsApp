@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Prediction } from "@/lib/types";
-import { formatEdge, formatOdds, formatGameTime } from "@/lib/utils";
+import { formatEdge, formatOdds, formatGameTime, gateFailed } from "@/lib/utils";
 
 interface HistoryTableProps {
   predictions: Prediction[];
@@ -40,7 +40,7 @@ function marginFor(p: Prediction, isV2: boolean): number | null {
 }
 
 /** Gate reason is a v2-only concept — v1 has no margin/form gating at all. */
-function gateReasonFor(p: Prediction, isV2: boolean): "edge" | "margin" | "form" | null {
+function gateReasonFor(p: Prediction, isV2: boolean): string | null {
   return isV2 ? p.adjusted_gate_reason : null;
 }
 
@@ -252,11 +252,11 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
                       className={`px-3 py-2.5 ${
                         margin !== null && margin >= 1.5
                           ? "font-semibold text-violet-300"
-                          : gateReason === "margin"
+                          : gateFailed(gateReason, "margin")
                           ? "font-medium text-rose-400"
                           : "text-slate-500"
                       }`}
-                      title={gateReason === "margin" ? "Margin gate vetoed this bet" : undefined}
+                      title={gateFailed(gateReason, "margin") ? "Margin gate vetoed this bet" : undefined}
                     >
                       {margin !== null ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}` : "—"}
                     </td>
@@ -323,28 +323,34 @@ function RecBadge({
   gateReason
 }: {
   rec: Prediction["recommendation"];
-  gateReason?: "edge" | "margin" | "form" | null;
+  gateReason?: string | null;
 }) {
   if (!rec || rec === "NO_BET") {
     // "edge" (never a real disagreement) and null (v1 view, or no v2 data) stay a
     // plain dash — only margin/form are informative "this WAS a bet, then vetoed" cases.
-    if (gateReason === "form") {
+    // Both can fail at once, so this shows every gate that vetoed it, not just one.
+    const failed: string[] = [];
+    if (gateFailed(gateReason ?? null, "margin")) failed.push("margin");
+    if (gateFailed(gateReason ?? null, "form")) failed.push("form");
+
+    if (failed.length > 0) {
+      const color = failed.length > 1
+        ? "text-amber-400"
+        : failed[0] === "form"
+        ? "text-fuchsia-400"
+        : "text-rose-400";
       return (
         <span
-          className="text-xs font-medium text-fuchsia-400"
-          title="Recent-form guard vetoed this bet"
+          className={`text-xs font-medium ${color}`}
+          title={
+            failed.length > 1
+              ? "Both margin and form gates vetoed this bet"
+              : failed[0] === "form"
+              ? "Recent-form guard vetoed this bet"
+              : "Margin gate vetoed this bet — raw disagreement was under 1.5 Ks"
+          }
         >
-          — <span className="opacity-80">form</span>
-        </span>
-      );
-    }
-    if (gateReason === "margin") {
-      return (
-        <span
-          className="text-xs font-medium text-rose-400"
-          title="Margin gate vetoed this bet — raw disagreement was under 1.5 Ks"
-        >
-          — <span className="opacity-80">margin</span>
+          — <span className="opacity-80">{failed.join(", ")}</span>
         </span>
       );
     }

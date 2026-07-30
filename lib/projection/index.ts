@@ -368,14 +368,19 @@ interface V2Result {
   adjustedRecommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
   adjustedUnits: number;
   /**
-   * Which gate produced a NO_BET, so the UI can say why instead of just "No Bet":
-   *   "edge"   — neither side ever cleared the premium/min-edge threshold (no real
-   *              disagreement with the market even after shrinkage — most NO_BETs)
-   *   "margin" — a side was selected but the raw projection-vs-line gap was < 1.5 Ks
-   *   "form"   — margin cleared, but recent-form ratio vetoed the side
-   *   null     — a bet fired
+   * Which gate(s) produced a NO_BET, so the UI can say why instead of just "No Bet".
+   * Comma-separated when more than one applies — margin and form are independent
+   * checks, so a bet can fail both at once and both should be visible, not just
+   * whichever check happened to run first:
+   *   "edge"        — neither side ever cleared the premium/min-edge threshold (no
+   *                   real disagreement with the market even after shrinkage —
+   *                   most NO_BETs; margin/form are never evaluated without a side)
+   *   "margin"      — raw projection-vs-line gap was < 1.5 Ks
+   *   "form"        — recent-form ratio vetoed the side
+   *   "margin,form" — both failed
+   *   null          — a bet fired
    */
-  gateReason: "edge" | "margin" | "form" | null;
+  gateReason: string | null;
 }
 
 /**
@@ -461,19 +466,23 @@ function computeV2(
   // value is only for pricing. A sub-1.5 K gap is noise against a ~1.9 MAE.
   const margin =
     side === "BET_UNDER" ? propLine - rawProjectedKs : rawProjectedKs - propLine;
-  if (margin < MIN_MARGIN_KS) {
-    return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "margin" };
-  }
+  const marginFailed = margin < MIN_MARGIN_KS;
 
   // --- Gate 2: recent form ---
   const formRatio = computeFormRatio(stats);
-  if (formRatio !== null) {
-    if (side === "BET_UNDER" && formRatio > FORM_HOT_RATIO) {
-      return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "form" };
-    }
-    if (side === "BET_OVER" && formRatio < FORM_COLD_RATIO) {
-      return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "form" };
-    }
+  const formFailed =
+    formRatio !== null &&
+    ((side === "BET_UNDER" && formRatio > FORM_HOT_RATIO) ||
+      (side === "BET_OVER" && formRatio < FORM_COLD_RATIO));
+
+  // Both gates are always evaluated (no early return after margin) so a bet
+  // that fails both reports both, instead of only whichever check ran first.
+  if (marginFailed || formFailed) {
+    const reasons = [
+      ...(marginFailed ? ["margin"] : []),
+      ...(formFailed ? ["form"] : [])
+    ];
+    return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: reasons.join(",") };
   }
 
   return {

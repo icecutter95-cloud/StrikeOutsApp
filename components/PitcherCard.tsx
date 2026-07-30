@@ -9,7 +9,8 @@ import {
   getActiveEdge,
   getActiveUnits,
   getProjectionMargin,
-  isActiveBet
+  isActiveBet,
+  gateFailed
 } from "@/lib/utils";
 
 interface PitcherCardProps {
@@ -197,7 +198,7 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
   // gate_reason === "margin" means this specific bet had a real side selected
   // and got vetoed for falling short here — distinct from a plain low margin
   // where there was never enough disagreement with the market to matter.
-  const blocked = prediction.adjusted_gate_reason === "margin";
+  const blocked = gateFailed(prediction.adjusted_gate_reason, "margin");
 
   return (
     <span
@@ -227,7 +228,7 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
  * (>1.62) and overs when cold (<1.18), so there's no ambiguity to resolve.
  */
 function FormGateBadge({ prediction }: { prediction: Prediction }) {
-  if (prediction.adjusted_gate_reason !== "form") return null;
+  if (!gateFailed(prediction.adjusted_gate_reason, "form")) return null;
 
   const { last3_k_rate, season_k_pct } = prediction;
   if (last3_k_rate === null || season_k_pct === null || season_k_pct === 0) return null;

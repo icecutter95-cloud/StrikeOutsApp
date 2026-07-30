@@ -189,6 +189,18 @@ export function isActiveBet(
   return rec !== null && rec !== "NO_BET";
 }
 
+/**
+ * Whether a specific v2 gate is among the ones that vetoed a bet.
+ * adjusted_gate_reason is comma-separated when a bet fails more than one gate
+ * (e.g. "margin,form"), so this can't be a strict equality check.
+ */
+export function gateFailed(
+  gateReason: string | null,
+  gate: "edge" | "margin" | "form"
+): boolean {
+  return gateReason?.split(",").includes(gate) ?? false;
+}
+
 // ============================================================
 // Date helpers
 // ============================================================
