@@ -332,7 +332,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
       )}
 
       {/* Table */}
-      <HistoryTable predictions={predictions} />
+      <HistoryTable predictions={predictions} modelView={modelView} />
 
       {/* Pagination */}
       {totalPages > 1 && (

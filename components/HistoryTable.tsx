@@ -6,6 +6,54 @@ import { formatEdge, formatOdds, formatGameTime } from "@/lib/utils";
 
 interface HistoryTableProps {
   predictions: Prediction[];
+  /**
+   * Which model's recommendation/edge/margin/grading to display. Defaults to v2.
+   *
+   * Deliberately NOT lib/utils's getActiveRecommendation() etc — those always
+   * prefer v2 when adjusted_recommendation is present, which is right for the
+   * dashboard (no toggle there) but wrong here: every backfilled row has
+   * adjusted_recommendation set, so that helper would silently ignore a "v1"
+   * selection and keep showing v2 data. These local versions respect the toggle.
+   */
+  modelView?: "v1" | "v2";
+}
+
+function recFor(p: Prediction, isV2: boolean): Prediction["recommendation"] {
+  if (isV2) return p.adjusted_recommendation ?? p.recommendation;
+  return p.recommendation;
+}
+
+function edgeFor(p: Prediction, isV2: boolean): number | null {
+  const raw = isV2 && p.adjusted_recommendation !== null ? p.adjusted_edge_pct : p.edge_pct;
+  return raw === null || raw === undefined ? null : Number(raw);
+}
+
+/** Margin measured toward whichever side is active under the selected model view. */
+function marginFor(p: Prediction, isV2: boolean): number | null {
+  if (p.projected_ks === null || p.prop_line === null) return null;
+  const proj = Number(p.projected_ks);
+  const line = Number(p.prop_line);
+  const rec = recFor(p, isV2);
+  if (rec === "BET_UNDER") return line - proj;
+  if (rec === "BET_OVER") return proj - line;
+  return Math.abs(proj - line);
+}
+
+/**
+ * Correctness derived from actual_ks vs prop_line for whichever model is
+ * active. The stored model_correct column is always v1's grading, so under v2
+ * it can't be reused directly — this reproduces it exactly on v1 rows and
+ * extends the same logic to v2's adjusted_recommendation.
+ */
+function isCorrect(
+  p: Prediction,
+  rec: Prediction["recommendation"]
+): boolean | null {
+  if (!rec || rec === "NO_BET") return null;
+  if (p.actual_ks === null || p.prop_line === null) return null;
+  return rec === "BET_OVER"
+    ? p.actual_ks > p.prop_line
+    : p.actual_ks < p.prop_line;
 }
 
 type SortField =
@@ -21,9 +69,10 @@ interface SortState {
   direction: "asc" | "desc";
 }
 
-export default function HistoryTable({ predictions }: HistoryTableProps) {
+export default function HistoryTable({ predictions, modelView = "v2" }: HistoryTableProps) {
   const [sort, setSort] = useState<SortState>({ field: "game_date", direction: "desc" });
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const isV2 = modelView === "v2";
 
   const handleSort = (field: SortField) => {
     setSort((prev) =>
@@ -34,8 +83,10 @@ export default function HistoryTable({ predictions }: HistoryTableProps) {
   };
 
   const sorted = [...predictions].sort((a, b) => {
-    const aVal = a[sort.field];
-    const bVal = b[sort.field];
+    // edge_pct sorts on whichever model is active, since v1 and v2 edges are
+    // on different scales (v2 is shrunk ~1/4) and mixing them would be meaningless.
+    const aVal = sort.field === "edge_pct" ? edgeFor(a, isV2) : a[sort.field];
+    const bVal = sort.field === "edge_pct" ? edgeFor(b, isV2) : b[sort.field];
     if (aVal === null || aVal === undefined) return 1;
     if (bVal === null || bVal === undefined) return -1;
     const cmp = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
@@ -50,6 +101,7 @@ export default function HistoryTable({ predictions }: HistoryTableProps) {
       "Opponent",
       "Proj Ks",
       "Line",
+      "Margin",
       "Edge%",
       "Rec",
       "Lineup",
@@ -59,30 +111,38 @@ export default function HistoryTable({ predictions }: HistoryTableProps) {
       "Bet Result"
     ].join(",");
 
-    const rows = sorted.map((p) =>
-      [
+    const rows = sorted.map((p) => {
+      const rec = recFor(p, isV2);
+      const edge = edgeFor(p, isV2);
+      const margin = marginFor(p, isV2);
+      const correct = isV2 && p.adjusted_recommendation !== null
+        ? isCorrect(p, rec)
+        : p.model_correct;
+
+      return [
         p.game_date,
         `"${p.pitcher_name}"`,
         p.team,
         p.opponent,
         p.projected_ks?.toFixed(1) ?? "",
         p.prop_line?.toFixed(1) ?? "",
-        p.edge_pct !== null ? (p.edge_pct * 100).toFixed(1) : "",
-        p.recommendation ?? "",
+        margin !== null ? margin.toFixed(1) : "",
+        edge !== null ? (edge * 100).toFixed(1) : "",
+        rec ?? "",
         p.lineup_confirmation_status ?? "",
         p.steam_flag ? "Y" : "N",
         p.actual_ks ?? "",
-        p.model_correct === true ? "W" : p.model_correct === false ? "L" : "",
+        correct === true ? "W" : correct === false ? "L" : "",
         p.bet_result ?? ""
-      ].join(",")
-    );
+      ].join(",");
+    });
 
     const csv = [headers, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `strikeouts-history-${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `strikeouts-history-${modelView}-${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -117,6 +177,7 @@ export default function HistoryTable({ predictions }: HistoryTableProps) {
                   { label: "Matchup", field: null },
                   { label: "Proj Ks", field: "projected_ks" as SortField },
                   { label: "Line", field: "prop_line" as SortField },
+                  { label: "Margin", field: null },
                   { label: "Edge%", field: "edge_pct" as SortField },
                   { label: "Rec", field: null },
                   { label: "Lineup", field: null },
@@ -143,84 +204,104 @@ export default function HistoryTable({ predictions }: HistoryTableProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-700/50 bg-slate-800/50">
-            {sorted.map((p) => (
-              <>
-                <tr
-                  key={p.id}
-                  className={`cursor-pointer transition-colors hover:bg-slate-700/50 ${
-                    p.model_correct === true
-                      ? "bg-green-900/10"
-                      : p.model_correct === false
-                      ? "bg-red-900/10"
-                      : ""
-                  }`}
-                  onClick={() => setExpandedId((prev) => (prev === p.id ? null : p.id))}
-                >
-                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-400">
-                    {p.game_date}
-                  </td>
-                  <td className="px-3 py-2.5 font-medium text-white">
-                    {p.pitcher_name}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-400">
-                    {p.team} vs {p.opponent}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-200">
-                    {p.projected_ks?.toFixed(1) ?? "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-200">
-                    {p.prop_line?.toFixed(1) ?? "—"}
-                  </td>
-                  <td
-                    className={`px-3 py-2.5 font-medium ${
-                      p.recommendation !== "NO_BET" && p.edge_pct !== null && p.edge_pct > 0
-                        ? "text-green-400"
-                        : "text-slate-400"
-                    }`}
-                  >
-                    {p.edge_pct !== null ? formatEdge(p.edge_pct) : "—"}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <RecBadge rec={p.recommendation} />
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-400 capitalize">
-                    {p.lineup_confirmation_status ?? "—"}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {p.steam_flag ? (
-                      <span className="text-orange-400">
-                        {p.steam_direction === "up" ? "↑" : "↓"}
-                      </span>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td
-                    className={`px-3 py-2.5 font-semibold ${
-                      p.model_correct === true
-                        ? "text-green-400"
-                        : p.model_correct === false
-                        ? "text-red-400"
-                        : "text-slate-200"
-                    }`}
-                  >
-                    {p.actual_ks ?? "—"}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <ResultBadge correct={p.model_correct} betResult={p.bet_result} />
-                  </td>
-                </tr>
+            {sorted.map((p) => {
+              const rec = recFor(p, isV2);
+              const edge = edgeFor(p, isV2);
+              const margin = marginFor(p, isV2);
+              // v2 rows predating the migration have no adjusted_recommendation
+              // at all, so fall back to v1 grading rather than showing blank.
+              const correct = isV2 && p.adjusted_recommendation !== null
+                ? isCorrect(p, rec)
+                : p.model_correct;
 
-                {/* Expanded detail row */}
-                {expandedId === p.id && (
-                  <tr key={`${p.id}-expanded`} className="bg-slate-800/80">
-                    <td colSpan={11} className="px-4 py-3">
-                      <ExpandedRow prediction={p} />
+              return (
+                <>
+                  <tr
+                    key={p.id}
+                    className={`cursor-pointer transition-colors hover:bg-slate-700/50 ${
+                      correct === true
+                        ? "bg-green-900/10"
+                        : correct === false
+                        ? "bg-red-900/10"
+                        : ""
+                    }`}
+                    onClick={() => setExpandedId((prev) => (prev === p.id ? null : p.id))}
+                  >
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-400">
+                      {p.game_date}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium text-white">
+                      {p.pitcher_name}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-400">
+                      {p.team} vs {p.opponent}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-200">
+                      {p.projected_ks?.toFixed(1) ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-200">
+                      {p.prop_line?.toFixed(1) ?? "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-2.5 ${
+                        margin !== null && margin >= 1.5
+                          ? "font-semibold text-violet-300"
+                          : "text-slate-500"
+                      }`}
+                    >
+                      {margin !== null ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}` : "—"}
+                    </td>
+                    <td
+                      className={`px-3 py-2.5 font-medium ${
+                        rec !== "NO_BET" && edge !== null && edge > 0
+                          ? "text-green-400"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      {edge !== null ? formatEdge(edge) : "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <RecBadge rec={rec} />
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-400 capitalize">
+                      {p.lineup_confirmation_status ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {p.steam_flag ? (
+                        <span className="text-orange-400">
+                          {p.steam_direction === "up" ? "↑" : "↓"}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">—</span>
+                      )}
+                    </td>
+                    <td
+                      className={`px-3 py-2.5 font-semibold ${
+                        correct === true
+                          ? "text-green-400"
+                          : correct === false
+                          ? "text-red-400"
+                          : "text-slate-200"
+                      }`}
+                    >
+                      {p.actual_ks ?? "—"}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <ResultBadge correct={correct} betResult={p.bet_result} />
                     </td>
                   </tr>
-                )}
-              </>
-            ))}
+
+                  {/* Expanded detail row */}
+                  {expandedId === p.id && (
+                    <tr key={`${p.id}-expanded`} className="bg-slate-800/80">
+                      <td colSpan={12} className="px-4 py-3">
+                        <ExpandedRow prediction={p} />
+                      </td>
+                    </tr>
+                  )}
+                </>
+              );
+            })}
           </tbody>
         </table>
       </div>
