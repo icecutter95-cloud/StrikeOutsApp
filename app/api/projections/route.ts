@@ -194,12 +194,13 @@ export async function POST(req: NextRequest) {
           adjusted_edge_pct: number | null;
           adjusted_recommendation: string | null;
           adjusted_units: number | null;
+          adjusted_gate_reason: string | null;
         } | null = null;
 
         if (gameHasStarted && !matchedProp) {
           const { data: existing } = await supabase
             .from("predictions")
-            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units,adjusted_ks,adjusted_edge_pct,adjusted_recommendation,adjusted_units")
+            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units,adjusted_ks,adjusted_edge_pct,adjusted_recommendation,adjusted_units,adjusted_gate_reason")
             .eq("pitcher_id", game.pitcher_id)
             .eq("game_date", date)
             .single();
@@ -274,6 +275,7 @@ export async function POST(req: NextRequest) {
           adjusted_edge_pct: existingOdds && !matchedProp ? existingOdds.adjusted_edge_pct : projection.adjusted_edge_pct,
           adjusted_recommendation: existingOdds && !matchedProp ? existingOdds.adjusted_recommendation : projection.adjusted_recommendation,
           adjusted_units: existingOdds && !matchedProp ? existingOdds.adjusted_units : projection.adjusted_units,
+          adjusted_gate_reason: existingOdds && !matchedProp ? existingOdds.adjusted_gate_reason : projection.adjusted_gate_reason,
           projected_ip: projection.projected_ip,
           park_factor: projection.park_factor,
           weather_modifier: projection.weather_modifier,

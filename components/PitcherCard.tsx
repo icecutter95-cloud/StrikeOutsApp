@@ -95,6 +95,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
         <div className="mt-3 flex flex-wrap gap-1.5">
           <LineupBadge status={prediction.lineup_confirmation_status} />
           <MarginBadge prediction={prediction} />
+          <FormGateBadge prediction={prediction} />
           <LineMoveBadge prediction={prediction} />
           <OddsShiftBadge prediction={prediction} />
           <DivergenceBadge prediction={prediction} />
@@ -193,14 +194,55 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
   if (margin === null) return null;
 
   const meets = margin >= 1.5;
+  // gate_reason === "margin" means this specific bet had a real side selected
+  // and got vetoed for falling short here — distinct from a plain low margin
+  // where there was never enough disagreement with the market to matter.
+  const blocked = prediction.adjusted_gate_reason === "margin";
+
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-        meets ? "bg-violet-900/40 text-violet-300" : "bg-slate-700 text-slate-400"
+        meets
+          ? "bg-violet-900/40 text-violet-300"
+          : blocked
+          ? "bg-rose-900/40 text-rose-300"
+          : "bg-slate-700 text-slate-400"
       }`}
-      title={`Projection is ${Math.abs(margin).toFixed(1)} Ks from the line. v2 requires 1.5+ to bet.`}
+      title={
+        blocked
+          ? `Margin gate vetoed this bet — projection is only ${Math.abs(margin).toFixed(1)} Ks from the line, below the 1.5 threshold.`
+          : `Projection is ${Math.abs(margin).toFixed(1)} Ks from the line. v2 requires 1.5+ to bet.`
+      }
     >
-      Margin {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K{meets ? " ✓" : ""}
+      Margin {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K
+      {meets ? " ✓" : blocked ? " ✗" : ""}
+    </span>
+  );
+}
+
+/**
+ * Shown only when the recent-form guard is specifically what vetoed the bet
+ * (margin cleared 1.5, but form ratio was out of bounds). Direction is
+ * inferred from the ratio itself — the guard only ever blocks unders when hot
+ * (>1.62) and overs when cold (<1.18), so there's no ambiguity to resolve.
+ */
+function FormGateBadge({ prediction }: { prediction: Prediction }) {
+  if (prediction.adjusted_gate_reason !== "form") return null;
+
+  const { last3_k_rate, season_k_pct } = prediction;
+  if (last3_k_rate === null || season_k_pct === null || season_k_pct === 0) return null;
+
+  const ratio = last3_k_rate / season_k_pct;
+  const hot = ratio > 1.62;
+
+  return (
+    <span
+      className="rounded-full bg-fuchsia-900/40 px-2 py-0.5 text-xs font-medium text-fuchsia-300"
+      title={`Last-3 K rate is running at ${(ratio * 100).toFixed(0)}% of season pace — ${
+        hot ? "hot form vetoed the under" : "cold form vetoed the over"
+      }.`}
+    >
+      Form Veto {hot ? "🔥" : "🥶"}
     </span>
   );
 }

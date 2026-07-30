@@ -62,6 +62,8 @@ export interface Prediction {
   adjusted_edge_pct: number | null;
   adjusted_recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET" | null;
   adjusted_units: number | null;
+  /** Which v2 gate produced a NO_BET — "edge" | "margin" | "form" | null (bet fired, or no v2 data). */
+  adjusted_gate_reason: "edge" | "margin" | "form" | null;
   swstr_pct: number | null;
 
   // Steam
@@ -173,6 +175,7 @@ export interface ProjectionResult {
   adjusted_edge_pct: number | null;
   adjusted_recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
   adjusted_units: number;
+  adjusted_gate_reason: "edge" | "margin" | "form" | null;
   swstr_pct: number | null;
   projected_ip: number;
   steam_flag: boolean;

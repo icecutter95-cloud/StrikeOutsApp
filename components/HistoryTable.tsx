@@ -39,6 +39,11 @@ function marginFor(p: Prediction, isV2: boolean): number | null {
   return Math.abs(proj - line);
 }
 
+/** Gate reason is a v2-only concept — v1 has no margin/form gating at all. */
+function gateReasonFor(p: Prediction, isV2: boolean): "edge" | "margin" | "form" | null {
+  return isV2 ? p.adjusted_gate_reason : null;
+}
+
 /**
  * Correctness derived from actual_ks vs prop_line for whichever model is
  * active. The stored model_correct column is always v1's grading, so under v2
@@ -208,6 +213,7 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
               const rec = recFor(p, isV2);
               const edge = edgeFor(p, isV2);
               const margin = marginFor(p, isV2);
+              const gateReason = gateReasonFor(p, isV2);
               // v2 rows predating the migration have no adjusted_recommendation
               // at all, so fall back to v1 grading rather than showing blank.
               const correct = isV2 && p.adjusted_recommendation !== null
@@ -246,8 +252,11 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
                       className={`px-3 py-2.5 ${
                         margin !== null && margin >= 1.5
                           ? "font-semibold text-violet-300"
+                          : gateReason === "margin"
+                          ? "font-medium text-rose-400"
                           : "text-slate-500"
                       }`}
+                      title={gateReason === "margin" ? "Margin gate vetoed this bet" : undefined}
                     >
                       {margin !== null ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}` : "—"}
                     </td>
@@ -261,7 +270,7 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
                       {edge !== null ? formatEdge(edge) : "—"}
                     </td>
                     <td className="px-3 py-2.5">
-                      <RecBadge rec={rec} />
+                      <RecBadge rec={rec} gateReason={gateReason} />
                     </td>
                     <td className="px-3 py-2.5 text-slate-400 capitalize">
                       {p.lineup_confirmation_status ?? "—"}
@@ -309,8 +318,36 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
   );
 }
 
-function RecBadge({ rec }: { rec: Prediction["recommendation"] }) {
+function RecBadge({
+  rec,
+  gateReason
+}: {
+  rec: Prediction["recommendation"];
+  gateReason?: "edge" | "margin" | "form" | null;
+}) {
   if (!rec || rec === "NO_BET") {
+    // "edge" (never a real disagreement) and null (v1 view, or no v2 data) stay a
+    // plain dash — only margin/form are informative "this WAS a bet, then vetoed" cases.
+    if (gateReason === "form") {
+      return (
+        <span
+          className="text-xs font-medium text-fuchsia-400"
+          title="Recent-form guard vetoed this bet"
+        >
+          — <span className="opacity-80">form</span>
+        </span>
+      );
+    }
+    if (gateReason === "margin") {
+      return (
+        <span
+          className="text-xs font-medium text-rose-400"
+          title="Margin gate vetoed this bet — raw disagreement was under 1.5 Ks"
+        >
+          — <span className="opacity-80">margin</span>
+        </span>
+      );
+    }
     return <span className="text-slate-500">—</span>;
   }
   return (

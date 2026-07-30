@@ -345,6 +345,7 @@ export async function generateProjection(
     adjusted_edge_pct: v2.adjustedEdgePct,
     adjusted_recommendation: v2.adjustedRecommendation,
     adjusted_units: v2.adjustedUnits,
+    adjusted_gate_reason: v2.gateReason,
     swstr_pct: pitcherStats.swstr_pct,
     projected_ip: projectedIp,
     steam_flag: false, // Set by cron job after monitoring
@@ -366,6 +367,15 @@ interface V2Result {
   adjustedEdgePct: number | null;
   adjustedRecommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
   adjustedUnits: number;
+  /**
+   * Which gate produced a NO_BET, so the UI can say why instead of just "No Bet":
+   *   "edge"   — neither side ever cleared the premium/min-edge threshold (no real
+   *              disagreement with the market even after shrinkage — most NO_BETs)
+   *   "margin" — a side was selected but the raw projection-vs-line gap was < 1.5 Ks
+   *   "form"   — margin cleared, but recent-form ratio vetoed the side
+   *   null     — a bet fired
+   */
+  gateReason: "edge" | "margin" | "form" | null;
 }
 
 /**
@@ -400,7 +410,8 @@ function computeV2(
     adjustedKs: null,
     adjustedEdgePct: null,
     adjustedRecommendation: "NO_BET",
-    adjustedUnits: 0
+    adjustedUnits: 0,
+    gateReason: null
   };
 
   if (propLine === null || propOddsOver === null || propOddsUnder === null) {
@@ -437,7 +448,12 @@ function computeV2(
     side = "BET_UNDER";
     edge = edgeUnder;
   } else {
-    return { ...noBet, adjustedKs, adjustedEdgePct: Math.max(edgeOver, edgeUnder) };
+    return {
+      ...noBet,
+      adjustedKs,
+      adjustedEdgePct: Math.max(edgeOver, edgeUnder),
+      gateReason: "edge"
+    };
   }
 
   // --- Gate 1: margin, measured on the RAW projection ---
@@ -446,17 +462,17 @@ function computeV2(
   const margin =
     side === "BET_UNDER" ? propLine - rawProjectedKs : rawProjectedKs - propLine;
   if (margin < MIN_MARGIN_KS) {
-    return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+    return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "margin" };
   }
 
   // --- Gate 2: recent form ---
   const formRatio = computeFormRatio(stats);
   if (formRatio !== null) {
     if (side === "BET_UNDER" && formRatio > FORM_HOT_RATIO) {
-      return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+      return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "form" };
     }
     if (side === "BET_OVER" && formRatio < FORM_COLD_RATIO) {
-      return { ...noBet, adjustedKs, adjustedEdgePct: edge };
+      return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: "form" };
     }
   }
 
@@ -464,7 +480,8 @@ function computeV2(
     adjustedKs,
     adjustedEdgePct: edge,
     adjustedRecommendation: side,
-    adjustedUnits: V2_FLAT_UNITS
+    adjustedUnits: V2_FLAT_UNITS,
+    gateReason: null
   };
 }
 
