@@ -14,7 +14,7 @@ interface PageProps {
     lineup_status?: string;
     bet_placed?: string;
     k_line?: string;      // prop line e.g. "4.5"
-    recommendation?: string; // "BET_OVER" | "BET_UNDER"
+    recommendation?: string; // "ANY_BET" | "BET_OVER" | "BET_UNDER"
     model?: string;       // "v1" | "v2" — which model's recommendations to score
   };
 }
@@ -88,7 +88,12 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   if (searchParams.k_line) {
     query = query.eq("prop_line", parseFloat(searchParams.k_line));
   }
-  if (searchParams.recommendation) {
+  if (searchParams.recommendation === "ANY_BET") {
+    // Postgres NEQ excludes NULLs from matching (three-valued logic), so this
+    // naturally also drops rows with no recommendation at all — exactly what
+    // "recommended bets only" should mean.
+    query = query.neq(recField, "NO_BET");
+  } else if (searchParams.recommendation) {
     query = query.eq(recField, searchParams.recommendation);
   }
 
@@ -118,7 +123,11 @@ export default async function HistoryPage({ searchParams }: PageProps) {
     if (searchParams.lineup_status) q = q.eq("lineup_confirmation_status", searchParams.lineup_status);
     if (searchParams.bet_placed === "true") q = q.eq("user_bet_placed", true);
     if (searchParams.k_line)        q = q.eq("prop_line", parseFloat(searchParams.k_line));
-    if (searchParams.recommendation) q = q.eq(recField, searchParams.recommendation);
+    if (searchParams.recommendation === "ANY_BET") {
+      q = q.neq(recField, "NO_BET");
+    } else if (searchParams.recommendation) {
+      q = q.eq(recField, searchParams.recommendation);
+    }
 
     return q;
   }
@@ -136,7 +145,13 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   // Build a human-readable label for any active filters so it's clear what the stats are scoped to
   const activeFilterLabels: string[] = [];
   if (searchParams.k_line)        activeFilterLabels.push(`${searchParams.k_line} K line`);
-  if (searchParams.recommendation) activeFilterLabels.push(searchParams.recommendation === "BET_OVER" ? "Overs only" : "Unders only");
+  if (searchParams.recommendation) {
+    activeFilterLabels.push(
+      searchParams.recommendation === "BET_OVER" ? "Overs only"
+      : searchParams.recommendation === "BET_UNDER" ? "Unders only"
+      : `Recommended bets only (${modelView})`
+    );
+  }
   if (searchParams.date_from || searchParams.date_to) {
     activeFilterLabels.push(`${searchParams.date_from ?? "start"} → ${searchParams.date_to ?? "today"}`);
   }
@@ -483,7 +498,8 @@ function HistoryFilters({
         defaultValue={searchParams.recommendation ?? ""}
         className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white"
       >
-        <option value="">Over &amp; Under</option>
+        <option value="">All (incl. No Bet)</option>
+        <option value="ANY_BET">Recommended bets only</option>
         <option value="BET_OVER">Over only</option>
         <option value="BET_UNDER">Under only</option>
       </select>
