@@ -237,6 +237,44 @@ export default async function HistoryPage({ searchParams }: PageProps) {
     };
   });
 
+  // Totals row — same shape as a tier row, but across every recommended bet
+  // regardless of edge. The edge tiers partition the full range (v1's start at
+  // its 4% min-edge floor, v2's <2% bucket has no floor), so this is NOT a sum
+  // of the tier rows above — last10/last20 in particular have to be recomputed
+  // from the actual most-recent bets overall, not summed per-tier (which would
+  // double-count "the last 10" from each of six tiers).
+  const allBets = allPredictions.filter((p) => {
+    const rec = recOf(p);
+    return !!rec && rec !== "NO_BET";
+  });
+  const allWithResult = allBets.filter((p) => correctOf(p) !== null);
+  const allCorrect = allWithResult.filter((p) => correctOf(p)).length;
+  const allWins = allBets.filter((p) => correctOf(p) === true).length;
+  const allLosses = allBets.filter((p) => correctOf(p) === false).length;
+  const allUnits = allBets
+    .filter((p) => p.bet_result)
+    .reduce((sum, p) => {
+      if (p.bet_result === "win") return sum + (p.user_bet_units ?? 1);
+      if (p.bet_result === "loss") return sum - (p.user_bet_units ?? 1);
+      return sum;
+    }, 0);
+  const allByDate = [...allBets].sort((a, b) =>
+    (b.game_date ?? "").localeCompare(a.game_date ?? "")
+  );
+
+  const totalsStat = {
+    tier: "All Tiers",
+    min: -Infinity,
+    max: Infinity,
+    bets: allBets.length,
+    accuracy: allWithResult.length > 0 ? (allCorrect / allWithResult.length) * 100 : null,
+    wins: allWins,
+    losses: allLosses,
+    roi: allUnits,
+    last10: sliceRecord(allByDate, 10),
+    last20: sliceRecord(allByDate, 20)
+  };
+
   // Overall model accuracy
   const withResult = allPredictions.filter((p) => correctOf(p) !== null);
   const overallAccuracy =
@@ -333,7 +371,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
             <span className="ml-2 text-sm font-normal text-amber-400">({filterLabel})</span>
           )}
         </h2>
-        <StatsTable tierStats={tierStats} activeTierMin={activeTierMin} />
+        <StatsTable tierStats={tierStats} totals={totalsStat} activeTierMin={activeTierMin} />
       </section>
 
       {/* Filters */}

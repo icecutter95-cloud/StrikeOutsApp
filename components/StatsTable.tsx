@@ -23,6 +23,8 @@ interface TierStat {
 
 interface StatsTableProps {
   tierStats: TierStat[];
+  /** Aggregate row across every recommended bet, regardless of edge tier. */
+  totals?: TierStat;
   activeTierMin?: number | null;
 }
 
@@ -45,7 +47,66 @@ function RecentRecordCell({ record }: { record?: RecentRecord }) {
   );
 }
 
-export default function StatsTable({ tierStats, activeTierMin }: StatsTableProps) {
+/** The seven data cells shared by both a tier row and the totals row. */
+function StatRowCells({ row, bold }: { row: TierStat; bold?: boolean }) {
+  return (
+    <>
+      <td className={`px-4 py-3 text-right ${bold ? "font-semibold text-white" : "text-slate-300"}`}>
+        {row.bets}
+      </td>
+      <td className="px-4 py-3 text-right font-medium">
+        {row.wins > 0 || row.losses > 0 ? (
+          <span>
+            <span className="text-green-400">{row.wins}</span>
+            <span className="text-slate-500">-</span>
+            <span className="text-red-400">{row.losses}</span>
+          </span>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        {row.accuracy !== null ? (
+          <span
+            className={
+              row.accuracy >= 55
+                ? "font-semibold text-green-400"
+                : row.accuracy >= 50
+                ? "text-slate-200"
+                : "text-red-400"
+            }
+          >
+            {row.accuracy.toFixed(1)}%
+          </span>
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <RecentRecordCell record={row.last10} />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <RecentRecordCell record={row.last20} />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <span
+          className={
+            row.roi > 0
+              ? "font-semibold text-green-400"
+              : row.roi < 0
+              ? "text-red-400"
+              : "text-slate-400"
+          }
+        >
+          {row.roi > 0 ? "+" : ""}
+          {row.roi.toFixed(1)}u
+        </span>
+      </td>
+    </>
+  );
+}
+
+export default function StatsTable({ tierStats, totals, activeTierMin }: StatsTableProps) {
   const router = useRouter();
 
   if (tierStats.every((t) => t.bets === 0)) {
@@ -114,59 +175,19 @@ export default function StatsTable({ tierStats, activeTierMin }: StatsTableProps
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-right text-slate-300">{row.bets}</td>
-                <td className="px-4 py-3 text-right font-medium">
-                  {row.wins > 0 || row.losses > 0 ? (
-                    <span>
-                      <span className="text-green-400">{row.wins}</span>
-                      <span className="text-slate-500">-</span>
-                      <span className="text-red-400">{row.losses}</span>
-                    </span>
-                  ) : (
-                    <span className="text-slate-600">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {row.accuracy !== null ? (
-                    <span
-                      className={
-                        row.accuracy >= 55
-                          ? "font-semibold text-green-400"
-                          : row.accuracy >= 50
-                          ? "text-slate-200"
-                          : "text-red-400"
-                      }
-                    >
-                      {row.accuracy.toFixed(1)}%
-                    </span>
-                  ) : (
-                    <span className="text-slate-600">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <RecentRecordCell record={row.last10} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <RecentRecordCell record={row.last20} />
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <span
-                    className={
-                      row.roi > 0
-                        ? "font-semibold text-green-400"
-                        : row.roi < 0
-                        ? "text-red-400"
-                        : "text-slate-400"
-                    }
-                  >
-                    {row.roi > 0 ? "+" : ""}
-                    {row.roi.toFixed(1)}u
-                  </span>
-                </td>
+                <StatRowCells row={row} />
               </tr>
             );
           })}
         </tbody>
+        {totals && (
+          <tfoot>
+            <tr className="border-t-2 border-slate-600 bg-slate-800/80">
+              <td className="px-4 py-3 font-semibold text-white">{totals.tier}</td>
+              <StatRowCells row={totals} bold />
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );
