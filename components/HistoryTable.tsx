@@ -28,14 +28,28 @@ function edgeFor(p: Prediction, isV2: boolean): number | null {
   return raw === null || raw === undefined ? null : Number(raw);
 }
 
+/**
+ * The side to measure margin toward: the live rec if there is one, otherwise
+ * (under v2) whichever side v2's own pricing favored before a gate vetoed it.
+ * Deliberately not v1's raw recommendation as a fallback — v1 is computed off
+ * the raw projection and can point the opposite direction from what v2's
+ * shrunk-probability pricing actually leans (a heavily-favored price can flip
+ * the lean once the projection is shrunk toward the line).
+ */
+function sideFor(p: Prediction, isV2: boolean): Prediction["recommendation"] {
+  const rec = recFor(p, isV2);
+  if (rec && rec !== "NO_BET") return rec;
+  return isV2 ? p.adjusted_candidate_side : null;
+}
+
 /** Margin measured toward whichever side is active under the selected model view. */
 function marginFor(p: Prediction, isV2: boolean): number | null {
   if (p.projected_ks === null || p.prop_line === null) return null;
   const proj = Number(p.projected_ks);
   const line = Number(p.prop_line);
-  const rec = recFor(p, isV2);
-  if (rec === "BET_UNDER") return line - proj;
-  if (rec === "BET_OVER") return proj - line;
+  const side = sideFor(p, isV2);
+  if (side === "BET_UNDER") return line - proj;
+  if (side === "BET_OVER") return proj - line;
   return Math.abs(proj - line);
 }
 
@@ -213,6 +227,7 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
               const rec = recFor(p, isV2);
               const edge = edgeFor(p, isV2);
               const margin = marginFor(p, isV2);
+              const marginSide = sideFor(p, isV2);
               const gateReason = gateReasonFor(p, isV2);
               // v2 rows predating the migration have no adjusted_recommendation
               // at all, so fall back to v1 grading rather than showing blank.
@@ -256,9 +271,21 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
                           ? "font-medium text-rose-400"
                           : "text-slate-500"
                       }`}
-                      title={gateFailed(gateReason, "margin") ? "Margin gate vetoed this bet" : undefined}
+                      title={
+                        gateFailed(gateReason, "margin") && marginSide
+                          ? `Margin gate vetoed this bet — v2's own pricing leans ${
+                              marginSide === "BET_OVER" ? "over" : "under"
+                            }`
+                          : undefined
+                      }
                     >
-                      {margin !== null ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}` : "—"}
+                      {margin !== null
+                        ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}${
+                            !(margin >= 1.5) && marginSide
+                              ? ` (${marginSide === "BET_OVER" ? "O" : "U"})`
+                              : ""
+                          }`
+                        : "—"}
                     </td>
                     <td
                       className={`px-3 py-2.5 font-medium ${

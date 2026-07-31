@@ -346,6 +346,7 @@ export async function generateProjection(
     adjusted_recommendation: v2.adjustedRecommendation,
     adjusted_units: v2.adjustedUnits,
     adjusted_gate_reason: v2.gateReason,
+    adjusted_candidate_side: v2.candidateSide,
     swstr_pct: pitcherStats.swstr_pct,
     projected_ip: projectedIp,
     steam_flag: false, // Set by cron job after monitoring
@@ -381,6 +382,16 @@ interface V2Result {
    *   null          — a bet fired
    */
   gateReason: string | null;
+  /**
+   * Which side v2's own (shrunk-probability) pricing favored, even when a gate
+   * vetoed it — distinct from v1's recommendation, which is computed off the
+   * RAW projection and can point the opposite direction. A heavily-favored side
+   * (e.g. -160) can price out an over that the raw projection screams for once
+   * the projection is shrunk 75% toward the line, leaving v2 leaning under on a
+   * pitcher v1 wanted to bet over. Null when neither side ever cleared the
+   * initial edge threshold (gateReason "edge") — there's no side to speak of.
+   */
+  candidateSide: "BET_OVER" | "BET_UNDER" | null;
 }
 
 /**
@@ -416,7 +427,8 @@ function computeV2(
     adjustedEdgePct: null,
     adjustedRecommendation: "NO_BET",
     adjustedUnits: 0,
-    gateReason: null
+    gateReason: null,
+    candidateSide: null
   };
 
   if (propLine === null || propOddsOver === null || propOddsUnder === null) {
@@ -482,7 +494,13 @@ function computeV2(
       ...(marginFailed ? ["margin"] : []),
       ...(formFailed ? ["form"] : [])
     ];
-    return { ...noBet, adjustedKs, adjustedEdgePct: edge, gateReason: reasons.join(",") };
+    return {
+      ...noBet,
+      adjustedKs,
+      adjustedEdgePct: edge,
+      gateReason: reasons.join(","),
+      candidateSide: side
+    };
   }
 
   return {
@@ -490,7 +508,8 @@ function computeV2(
     adjustedEdgePct: edge,
     adjustedRecommendation: side,
     adjustedUnits: V2_FLAT_UNITS,
-    gateReason: null
+    gateReason: null,
+    candidateSide: side
   };
 }
 

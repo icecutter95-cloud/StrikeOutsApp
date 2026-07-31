@@ -200,6 +200,16 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
   // where there was never enough disagreement with the market to matter.
   const blocked = gateFailed(prediction.adjusted_gate_reason, "margin");
 
+  // Deliberately v2's side, not v1's raw recommendation — a heavily-favored
+  // price can flip v2's own lean to the under even when the raw projection
+  // sits well above the line (v1 would still call that an over). Falling back
+  // to v1 here would reproduce exactly the misreading this label exists to fix.
+  const side =
+    prediction.adjusted_recommendation && prediction.adjusted_recommendation !== "NO_BET"
+      ? prediction.adjusted_recommendation
+      : prediction.adjusted_candidate_side;
+  const sideLabel = !meets && side ? ` (${side === "BET_OVER" ? "Over" : "Under"})` : "";
+
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -211,30 +221,34 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
       }`}
       title={
         blocked
-          ? `Margin gate vetoed this bet — projection is only ${Math.abs(margin).toFixed(1)} Ks from the line, below the 1.5 threshold.`
+          ? `Margin gate vetoed this bet — v2's own pricing leans ${
+              side === "BET_OVER" ? "over" : "under"
+            }, but the projection is only ${Math.abs(margin).toFixed(1)} Ks from the line on that side, below the 1.5 threshold.`
           : `Projection is ${Math.abs(margin).toFixed(1)} Ks from the line. v2 requires 1.5+ to bet.`
       }
     >
-      Margin {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K
+      Margin{sideLabel} {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K
       {meets ? " ✓" : blocked ? " ✗" : ""}
     </span>
   );
 }
 
 /**
- * Shown only when the recent-form guard is specifically what vetoed the bet
- * (margin cleared 1.5, but form ratio was out of bounds). Direction is
- * inferred from the ratio itself — the guard only ever blocks unders when hot
- * (>1.62) and overs when cold (<1.18), so there's no ambiguity to resolve.
+ * Shown only when the recent-form guard is specifically what vetoed v2's
+ * candidate side (margin may or may not have also failed — see MarginBadge).
+ * Direction comes straight from adjusted_candidate_side rather than being
+ * re-derived from the ratio, so it can't disagree with what the Margin badge
+ * is showing for the same row.
  */
 function FormGateBadge({ prediction }: { prediction: Prediction }) {
   if (!gateFailed(prediction.adjusted_gate_reason, "form")) return null;
+  if (prediction.adjusted_candidate_side === null) return null;
 
   const { last3_k_rate, season_k_pct } = prediction;
   if (last3_k_rate === null || season_k_pct === null || season_k_pct === 0) return null;
 
   const ratio = last3_k_rate / season_k_pct;
-  const hot = ratio > 1.62;
+  const hot = prediction.adjusted_candidate_side === "BET_UNDER";
 
   return (
     <span

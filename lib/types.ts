@@ -64,6 +64,14 @@ export interface Prediction {
   adjusted_units: number | null;
   /** Which v2 gate(s) produced a NO_BET — "edge" | "margin" | "form" | "margin,form" | null (bet fired, or no v2 data). */
   adjusted_gate_reason: string | null;
+  /**
+   * Which side v2's shrunk-probability pricing favored, even when a gate vetoed
+   * it. Can differ from v1's recommendation (computed off the raw projection) —
+   * a heavily-favored price can flip which side v2 leans once the projection is
+   * shrunk toward the line. Null when neither side ever cleared the initial
+   * edge threshold, or the row predates this field.
+   */
+  adjusted_candidate_side: "BET_OVER" | "BET_UNDER" | null;
   swstr_pct: number | null;
 
   // Steam
@@ -176,6 +184,7 @@ export interface ProjectionResult {
   adjusted_recommendation: "BET_OVER" | "BET_UNDER" | "NO_BET";
   adjusted_units: number;
   adjusted_gate_reason: string | null;
+  adjusted_candidate_side: "BET_OVER" | "BET_UNDER" | null;
   swstr_pct: number | null;
   projected_ip: number;
   steam_flag: boolean;

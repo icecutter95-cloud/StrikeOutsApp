@@ -162,19 +162,35 @@ export function getActiveUnits(
  * recommended side. This is v2's primary gate (>= 1.5) and the strongest single
  * filter in the season backtest, so it's also useful as a dashboard sort key.
  *
- * With no live bet there's no side to measure toward, so fall back to the
- * absolute distance. Returns null when either input is missing.
+ * When there's no live bet, falls back to adjusted_candidate_side — the side
+ * v2's own pricing favored even though a gate vetoed it. That side can differ
+ * from what the raw projection alone implies: a heavily-favored price can price
+ * out an over the raw projection screams for once it's shrunk toward the line,
+ * leaving v2 leaning under on a pitcher whose projection sits way above the
+ * line. Showing an unsigned |proj - line| in that case reads as "leaning
+ * over" when v2 was actually leaning under — this resolves that ambiguity.
+ * Only falls back to the unsigned distance when neither side ever cleared the
+ * initial edge threshold at all (gate_reason "edge") and there's truly no side
+ * to speak of. Returns null when either input is missing.
  */
 export function getProjectionMargin(
   p: Pick<
     Prediction,
-    "projected_ks" | "prop_line" | "recommendation" | "adjusted_recommendation"
+    | "projected_ks"
+    | "prop_line"
+    | "recommendation"
+    | "adjusted_recommendation"
+    | "adjusted_candidate_side"
   >
 ): number | null {
   if (p.projected_ks === null || p.prop_line === null) return null;
   const proj = Number(p.projected_ks);
   const line = Number(p.prop_line);
-  const rec = getActiveRecommendation(p);
+  // getActiveRecommendation returns the literal string "NO_BET" (not null) when
+  // that's the live call, so a ?? fallback would never reach candidate_side —
+  // has to be checked explicitly.
+  const activeRec = getActiveRecommendation(p);
+  const rec = activeRec && activeRec !== "NO_BET" ? activeRec : p.adjusted_candidate_side;
 
   if (rec === "BET_UNDER") return line - proj;
   if (rec === "BET_OVER") return proj - line;
