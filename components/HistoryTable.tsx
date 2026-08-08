@@ -145,7 +145,7 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
         p.opponent,
         p.projected_ks?.toFixed(1) ?? "",
         p.prop_line?.toFixed(1) ?? "",
-        margin !== null ? margin.toFixed(1) : "",
+        margin !== null ? margin.toFixed(2) : "",
         edge !== null ? (edge * 100).toFixed(1) : "",
         rec ?? "",
         p.lineup_confirmation_status ?? "",
@@ -280,7 +280,7 @@ export default function HistoryTable({ predictions, modelView = "v2" }: HistoryT
                       }
                     >
                       {margin !== null
-                        ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(1)}${
+                        ? `${margin >= 0 ? "" : "−"}${Math.abs(margin).toFixed(2)}${
                             !(margin >= 1.5) && marginSide
                               ? ` (${marginSide === "BET_OVER" ? "O" : "U"})`
                               : ""

@@ -223,11 +223,11 @@ function MarginBadge({ prediction }: { prediction: Prediction }) {
         blocked
           ? `Margin gate vetoed this bet — v2's own pricing leans ${
               side === "BET_OVER" ? "over" : "under"
-            }, but the projection is only ${Math.abs(margin).toFixed(1)} Ks from the line on that side, below the 1.5 threshold.`
-          : `Projection is ${Math.abs(margin).toFixed(1)} Ks from the line. v2 requires 1.5+ to bet.`
+            }, but the projection is only ${Math.abs(margin).toFixed(2)} Ks from the line on that side, below the 1.5 threshold.`
+          : `Projection is ${Math.abs(margin).toFixed(2)} Ks from the line. v2 requires 1.5+ to bet.`
       }
     >
-      Margin{sideLabel} {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(1)}K
+      Margin{sideLabel} {margin >= 0 ? "" : "−"}{Math.abs(margin).toFixed(2)}K
       {meets ? " ✓" : blocked ? " ✗" : ""}
     </span>
   );
