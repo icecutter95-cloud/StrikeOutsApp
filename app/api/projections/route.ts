@@ -53,6 +53,21 @@ export async function POST(req: NextRequest) {
       try {
         const pitcherId = parseInt(game.pitcher_id, 10);
 
+        // Once a game has started and the book no longer has a line for it,
+        // there is nothing left to act on — skip it entirely rather than
+        // recomputing. A prior version of this route recomputed projected_ks
+        // fresh every run (new pitcher stats) while freezing only the
+        // edge/recommendation fields from the old row, which let the two drift
+        // out of sync: projected_ks would update to a new value while
+        // adjusted_recommendation stayed pinned to a stale computation against
+        // the OLD projection. Skipping outright keeps the whole row — and
+        // every field derived from the same generateProjection() call — as
+        // one consistent snapshot from the last time a real line existed.
+        const matchedProp = matchPropToPitcher(allProps, game.pitcher_name, game.pitcher_id);
+        if (new Date(game.game_time) < new Date() && !matchedProp) {
+          continue;
+        }
+
         // --- Pitcher stats: check cache first ---
         const { data: cachedStats } = await supabase
           .from("pitcher_stats_cache")
@@ -173,44 +188,9 @@ export async function POST(req: NextRequest) {
         );
 
         // --- Prop line ---
-        const matchedProp = matchPropToPitcher(allProps, game.pitcher_name, game.pitcher_id);
-
-        // If the game has already started and the API is no longer returning a line,
-        // preserve the existing odds/edge/recommendation from the DB so we don't wipe history.
-        const gameHasStarted = new Date(game.game_time) < new Date();
-        let existingOdds: {
-          prop_line: number | null;
-          prop_odds_over: number | null;
-          prop_odds_under: number | null;
-          opening_line: number | null;
-          edge_pct: number | null;
-          model_prob_over: number | null;
-          model_prob_under: number | null;
-          book_implied_over: number | null;
-          book_implied_under: number | null;
-          recommendation: string | null;
-          recommended_units: number | null;
-          adjusted_ks: number | null;
-          adjusted_edge_pct: number | null;
-          adjusted_recommendation: string | null;
-          adjusted_units: number | null;
-          adjusted_gate_reason: string | null;
-          adjusted_candidate_side: string | null;
-        } | null = null;
-
-        if (gameHasStarted && !matchedProp) {
-          const { data: existing } = await supabase
-            .from("predictions")
-            .select("prop_line,prop_odds_over,prop_odds_under,opening_line,edge_pct,model_prob_over,model_prob_under,book_implied_over,book_implied_under,recommendation,recommended_units,adjusted_ks,adjusted_edge_pct,adjusted_recommendation,adjusted_units,adjusted_gate_reason,adjusted_candidate_side")
-            .eq("pitcher_id", game.pitcher_id)
-            .eq("game_date", date)
-            .single();
-          existingOdds = existing ?? null;
-        }
-
-        const propLine = matchedProp?.line ?? existingOdds?.prop_line ?? null;
-        const propOddsOver = matchedProp?.odds_over ?? existingOdds?.prop_odds_over ?? null;
-        const propOddsUnder = matchedProp?.odds_under ?? existingOdds?.prop_odds_under ?? null;
+        const propLine = matchedProp?.line ?? null;
+        const propOddsOver = matchedProp?.odds_over ?? null;
+        const propOddsUnder = matchedProp?.odds_under ?? null;
 
         // --- Weather ---
         const weatherMod = await getWeatherModifier(game.venue, new Date(game.game_time));
@@ -263,21 +243,27 @@ export async function POST(req: NextRequest) {
           prop_odds_over: propOddsOver,
           prop_odds_under: propOddsUnder,
           // opening_line is intentionally excluded — set once via conditional update below
-          edge_pct: existingOdds && !matchedProp ? existingOdds.edge_pct : projection.edge_pct,
-          model_prob_over: existingOdds && !matchedProp ? existingOdds.model_prob_over : projection.model_prob_over,
-          model_prob_under: existingOdds && !matchedProp ? existingOdds.model_prob_under : projection.model_prob_under,
-          book_implied_over: existingOdds && !matchedProp ? existingOdds.book_implied_over : projection.book_implied_over,
-          book_implied_under: existingOdds && !matchedProp ? existingOdds.book_implied_under : projection.book_implied_under,
-          recommendation: existingOdds && !matchedProp ? existingOdds.recommendation : projection.recommendation,
-          recommended_units: existingOdds && !matchedProp ? existingOdds.recommended_units : projection.recommended_units,
-          // v2 outputs — only overwritten while the line is still live, same as v1
+          //
+          // No more existingOdds fallback here — the early skip above guarantees
+          // that if we've reached this point, either the game hasn't started, or
+          // it has and a live line still exists. Every field below is written
+          // fresh together, from the single generateProjection() call above, so
+          // the row can never end up internally inconsistent (e.g. projected_ks
+          // reflecting a newer pitcher-stats fetch than adjusted_recommendation).
+          edge_pct: projection.edge_pct,
+          model_prob_over: projection.model_prob_over,
+          model_prob_under: projection.model_prob_under,
+          book_implied_over: projection.book_implied_over,
+          book_implied_under: projection.book_implied_under,
+          recommendation: projection.recommendation,
+          recommended_units: projection.recommended_units,
           model_version: "v2",
-          adjusted_ks: existingOdds && !matchedProp ? existingOdds.adjusted_ks : projection.adjusted_ks,
-          adjusted_edge_pct: existingOdds && !matchedProp ? existingOdds.adjusted_edge_pct : projection.adjusted_edge_pct,
-          adjusted_recommendation: existingOdds && !matchedProp ? existingOdds.adjusted_recommendation : projection.adjusted_recommendation,
-          adjusted_units: existingOdds && !matchedProp ? existingOdds.adjusted_units : projection.adjusted_units,
-          adjusted_gate_reason: existingOdds && !matchedProp ? existingOdds.adjusted_gate_reason : projection.adjusted_gate_reason,
-          adjusted_candidate_side: existingOdds && !matchedProp ? existingOdds.adjusted_candidate_side : projection.adjusted_candidate_side,
+          adjusted_ks: projection.adjusted_ks,
+          adjusted_edge_pct: projection.adjusted_edge_pct,
+          adjusted_recommendation: projection.adjusted_recommendation,
+          adjusted_units: projection.adjusted_units,
+          adjusted_gate_reason: projection.adjusted_gate_reason,
+          adjusted_candidate_side: projection.adjusted_candidate_side,
           projected_ip: projection.projected_ip,
           park_factor: projection.park_factor,
           weather_modifier: projection.weather_modifier,
