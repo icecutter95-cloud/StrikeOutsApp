@@ -19,10 +19,28 @@ export async function GET(req: NextRequest) {
     const today = toEasternDateString();
     const supabase = await createServiceClient();
 
-    // Fetch all predictions that are not yet final and from before today
+    // Fetch predictions that are not yet final and from before today.
+    //
+    // Bounded to a rolling lookback window rather than "since the season
+    // began" — a handful of predictions per date never resolve (resolveGamePk
+    // can't match them: scratched starters, postponements, name mismatches
+    // against the MLB API) and were being re-queried and re-attempted by this
+    // route every single day, forever. Each attempt makes its own MLB schedule
+    // + boxscore API calls, so the backlog's cost compounds daily. By
+    // 2026-08-14 that backlog had grown to 60+ stragglers going back to April,
+    // and adding a normal ~18-game day on top of it pushed the run past the
+    // 60s function limit — it got killed mid-run with no logged error (a bare
+    // 500, no stack trace), silently leaving that whole day's games unclosed.
+    // A prediction that hasn't resolved in 5 days isn't going to resolve on
+    // day 6 either; stop paying for it.
+    const lookbackDate = toEasternDateString(
+      new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+    );
+
     const { data: predictions, error: predErr } = await supabase
       .from("predictions")
       .select("*")
+      .gte("game_date", lookbackDate)
       .lt("game_date", today)
       .neq("game_status", "final");
 
