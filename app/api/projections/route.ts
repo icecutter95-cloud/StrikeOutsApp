@@ -53,18 +53,29 @@ export async function POST(req: NextRequest) {
       try {
         const pitcherId = parseInt(game.pitcher_id, 10);
 
-        // Once a game has started and the book no longer has a line for it,
-        // there is nothing left to act on — skip it entirely rather than
-        // recomputing. A prior version of this route recomputed projected_ks
-        // fresh every run (new pitcher stats) while freezing only the
-        // edge/recommendation fields from the old row, which let the two drift
-        // out of sync: projected_ks would update to a new value while
-        // adjusted_recommendation stayed pinned to a stale computation against
-        // the OLD projection. Skipping outright keeps the whole row — and
-        // every field derived from the same generateProjection() call — as
-        // one consistent snapshot from the last time a real line existed.
+        // Once a game has started, skip it entirely — this is a pregame model
+        // and there is no sound betting decision left to make. Originally this
+        // only skipped when no line was found, which let two different bugs
+        // corrupt an already-decided pregame recommendation:
+        //   1. projected_ks was recomputed fresh every run (new pitcher-stats
+        //      fetch) while edge/recommendation fields were only conditionally
+        //      frozen, letting the two drift out of sync with each other.
+        //   2. Once the pregame market closes, matchPropToPitcher's last-name
+        //      fallback and parseKProps' name-only outcome grouping (no
+        //      discrimination by line value) can both latch onto an unrelated
+        //      or alt-line entry that happens to still be on the board —
+        //      producing a "matched" line that has nothing to do with the
+        //      pitcher's real pregame market. This actually happened: Martín
+        //      Pérez's line jumped from a real, all-day 3.5 to 6.5 sometime
+        //      after his game started, with no fetch-odds snapshot ever having
+        //      recorded 6.5 — the 6.5 came from this route matching to
+        //      something else entirely, and a 0.78 K margin (correctly
+        //      NO_BET) turned into a 3.78 K margin and a live BET_UNDER.
+        // Skipping unconditionally once started means neither failure mode
+        // matters anymore — the row simply stays exactly as it was the last
+        // time a real pregame market existed.
         const matchedProp = matchPropToPitcher(allProps, game.pitcher_name, game.pitcher_id);
-        if (new Date(game.game_time) < new Date() && !matchedProp) {
+        if (new Date(game.game_time) < new Date()) {
           continue;
         }
 

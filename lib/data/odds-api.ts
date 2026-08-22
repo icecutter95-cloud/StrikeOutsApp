@@ -239,14 +239,22 @@ export function matchPropToPitcher(
     }
   }
 
-  // 3. Last name only fallback (only if last name is long enough to be unambiguous)
+  // 3. Last name only fallback — only if it's the UNIQUE prop with that last
+  // name. A length check alone isn't enough: "Perez", "Garcia", "Rodriguez"
+  // etc. are long but extremely common surnames, and props include both
+  // pitcher_strikeouts and batter_strikeouts markets across every game on the
+  // slate, not just this pitcher's own game — a same-surname batter or a
+  // different team's pitcher is a real collision, not a hypothetical one.
+  // Matching the wrong player's line wrong is worse than not matching at all,
+  // since a bad match still produces a confident-looking recommendation.
   if (targetLast.length > 4) {
-    for (const prop of props) {
+    const matches = props.filter((prop) => {
       const propNorm = normalizeName(prop.pitcher_name);
       const propLast = propNorm.split(" ").pop() ?? "";
-      if (propLast === targetLast) {
-        return { ...prop, pitcher_id: pitcherId };
-      }
+      return propLast === targetLast;
+    });
+    if (matches.length === 1) {
+      return { ...matches[0], pitcher_id: pitcherId };
     }
   }
 
