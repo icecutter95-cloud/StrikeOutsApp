@@ -96,7 +96,11 @@ export function formatOdds(odds: number): string {
  * Format edge percentage as string (+5.2%, -1.3%).
  */
 export function formatEdge(edge: number): string {
-  const pct = (edge * 100).toFixed(1);
+  // 2 decimals, not 1 — v2's min-edge gate is 0.5%, and a value like 0.4718%
+  // rounds to "+0.5%" at one decimal, which visually clears a threshold it
+  // actually misses. Same class of illusion the Margin badge had against the
+  // 1.5 Ks gate.
+  const pct = (edge * 100).toFixed(2);
   return edge >= 0 ? `+${pct}%` : `${pct}%`;
 }
 
