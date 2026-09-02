@@ -72,6 +72,16 @@ export interface Prediction {
    * edge threshold, or the row predates this field.
    */
   adjusted_candidate_side: "BET_OVER" | "BET_UNDER" | null;
+  /**
+   * When adjusted_recommendation first became a real bet today. Set once,
+   * never overwritten — a later price move can flip the row back to NO_BET,
+   * but this stays as evidence a live recommendation window existed. NULL
+   * means never recommended today.
+   */
+  adjusted_first_recommended_at: string | null;
+  adjusted_first_recommended_side: "BET_OVER" | "BET_UNDER" | null;
+  adjusted_first_recommended_odds: number | null;
+  adjusted_first_recommended_edge_pct: number | null;
   swstr_pct: number | null;
 
   // Steam

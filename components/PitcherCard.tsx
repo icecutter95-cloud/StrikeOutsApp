@@ -97,6 +97,7 @@ export default function PitcherCard({ prediction, date }: PitcherCardProps) {
           <LineupBadge status={prediction.lineup_confirmation_status} />
           <MarginBadge prediction={prediction} />
           <FormGateBadge prediction={prediction} />
+          <WasRecommendedBadge prediction={prediction} />
           <LineMoveBadge prediction={prediction} />
           <OddsShiftBadge prediction={prediction} />
           <DivergenceBadge prediction={prediction} />
@@ -258,6 +259,36 @@ function FormGateBadge({ prediction }: { prediction: Prediction }) {
       }.`}
     >
       Form Veto {hot ? "🔥" : "🥶"}
+    </span>
+  );
+}
+
+/**
+ * Shown only when the card is NOT currently a live bet but was one earlier
+ * today. Grading still runs off the current adjusted_recommendation (or
+ * whatever it freezes to at first pitch) — this is purely a breadcrumb so
+ * checking the board later than a price move doesn't erase all trace that a
+ * real recommendation window existed. See Andrew Painter, 2026-09-02: over
+ * was live most of the day, then the market moved (over -130 -> -162) and
+ * priced it out with no visible sign one was ever there.
+ */
+function WasRecommendedBadge({ prediction }: { prediction: Prediction }) {
+  if (isActiveBet(prediction)) return null;
+  const { adjusted_first_recommended_at, adjusted_first_recommended_side, adjusted_first_recommended_odds } = prediction;
+  if (adjusted_first_recommended_at === null) return null;
+
+  const isOver = adjusted_first_recommended_side === "BET_OVER";
+  const oddsLabel =
+    adjusted_first_recommended_odds !== null ? formatOdds(adjusted_first_recommended_odds) : "—";
+
+  return (
+    <span
+      className="rounded-full bg-sky-900/40 px-2 py-0.5 text-xs font-medium text-sky-300"
+      title={`This was a live ${
+        isOver ? "Over" : "Under"
+      } recommendation at ${formatGameTime(adjusted_first_recommended_at)} at ${oddsLabel} — a later price move took the edge away.`}
+    >
+      Was {isOver ? "Over" : "Under"} @ {oddsLabel} · {formatGameTime(adjusted_first_recommended_at)}
     </span>
   );
 }

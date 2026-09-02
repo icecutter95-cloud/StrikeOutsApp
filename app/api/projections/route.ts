@@ -302,6 +302,26 @@ export async function POST(req: NextRequest) {
             .update({ opening_line: propLine })
             .eq("id", upserted.id)
             .is("opening_line", null);
+
+          // Same set-once pattern, for the first time this pitcher becomes a
+          // real v2 bet today. Odds moving over the course of the day can
+          // legitimately flip a live recommendation back to NO_BET (see the
+          // Painter case, 2026-09-02) — that's expected pregame behavior, not
+          // a bug, but checking the board later than that flip otherwise loses
+          // all trace that a real recommendation window ever existed.
+          if (projection.adjusted_recommendation !== "NO_BET") {
+            await supabase
+              .from("predictions")
+              .update({
+                adjusted_first_recommended_at: new Date().toISOString(),
+                adjusted_first_recommended_side: projection.adjusted_recommendation,
+                adjusted_first_recommended_odds:
+                  projection.adjusted_recommendation === "BET_OVER" ? propOddsOver : propOddsUnder,
+                adjusted_first_recommended_edge_pct: projection.adjusted_edge_pct
+              })
+              .eq("id", upserted.id)
+              .is("adjusted_first_recommended_at", null);
+          }
         }
 
         projectionResults.push({
