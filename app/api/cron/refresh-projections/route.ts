@@ -40,12 +40,25 @@ export async function GET(req: NextRequest) {
       ? `https://${process.env.VERCEL_URL}`
       : "http://localhost:3000";
 
+    // VERCEL_AUTOMATION_BYPASS_SECRET is auto-provisioned by Vercel once
+    // "Protection Bypass for Automation" is turned on under Deployment
+    // Protection settings. Without it, this self-call gets caught by Vercel
+    // Authentication (SSO protection) itself — a platform-level 401 that
+    // happens before our own CRON_SECRET check ever runs, since it intercepts
+    // the request before it reaches route code at all. That's exactly what
+    // silently broke every refresh-projections run from 2026-09-02 22:01 UTC
+    // through 2026-09-03 15:01 UTC: three straight failures, no lineups
+    // updated for a full day, discovered only because the user noticed lineups
+    // hadn't confirmed for games that had already started.
+    const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+
     const res = await fetch(`${baseUrl}/api/projections`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         // Forward the cron secret so the projections route can trust the call
-        ...(cronSecret ? { Authorization: `Bearer ${cronSecret}` } : {})
+        ...(cronSecret ? { Authorization: `Bearer ${cronSecret}` } : {}),
+        ...(bypassSecret ? { "x-vercel-protection-bypass": bypassSecret } : {})
       },
       body: JSON.stringify({ date })
     });
@@ -53,6 +66,14 @@ export async function GET(req: NextRequest) {
     if (!res.ok) {
       const text = await res.text();
       console.error("[refresh-projections] projections POST failed:", res.status, text);
+      if (res.status === 401 && !bypassSecret) {
+        console.error(
+          "[refresh-projections] No VERCEL_AUTOMATION_BYPASS_SECRET set — if this " +
+          "401 is Vercel's own auth wall ('Protected deployment'), enable " +
+          "'Protection Bypass for Automation' under Project Settings > " +
+          "Deployment Protection. It auto-provisions this env var."
+        );
+      }
       return NextResponse.json(
         { error: `Projections POST returned ${res.status}`, detail: text },
         { status: 502 }
